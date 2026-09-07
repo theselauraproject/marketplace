@@ -1,0 +1,1 @@
+ALTER TYPE "project_status" ADD VALUE 'hidden';

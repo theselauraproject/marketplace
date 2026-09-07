@@ -1,0 +1,10 @@
+{
+  "name": "@selaura/types",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./project": "./src/project.ts",
+    "./user": "./src/user.ts"
+  }
+}

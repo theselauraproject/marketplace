@@ -1,0 +1,434 @@
+@import "tailwindcss";
+
+:root {
+    --background: #f2f1e3;
+    --foreground: #1c1b16;
+
+    --surface: rgba(0, 0, 0, 0.06);
+    --surface-hover: rgba(0, 0, 0, 0.1);
+
+    --border: rgba(0, 0, 0, 0.14);
+    --border-strong: rgba(0, 0, 0, 0.26);
+
+    --muted: rgba(28, 27, 22, 0.62);
+    --faint: rgba(28, 27, 22, 0.42);
+
+    --shadow: rgba(0, 0, 0, 0.12);
+
+    --ring-top: rgba(255, 255, 255, 0.9);
+    --ring-bottom: rgba(0, 0, 0, 0.16);
+
+    --ring-top-inverse: rgba(255, 255, 255, 0.18);
+    --ring-bottom-inverse: rgba(0, 0, 0, 0.55);
+
+    --ring-top-surface: rgba(255, 255, 255, 0.5);
+    --ring-bottom-surface: rgba(0, 0, 0, 0.1);
+
+    --success: #1f9d55;
+    --success-bg: rgba(31, 157, 85, 0.12);
+    --danger: #d43f5f;
+    --danger-bg: rgba(212, 63, 95, 0.12);
+}
+
+html[data-theme="dark"] {
+    --background: #131313;
+    --foreground: #f2f1e3;
+
+    --surface: rgba(255, 255, 255, 0.055);
+    --surface-hover: rgba(255, 255, 255, 0.09);
+
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+
+    --muted: rgba(242, 241, 227, 0.6);
+    --faint: rgba(242, 241, 227, 0.4);
+
+    --shadow: rgba(0, 0, 0, 0.45);
+
+    --ring-top: rgba(255, 255, 255, 0.14);
+    --ring-bottom: rgba(0, 0, 0, 0.55);
+
+    --ring-top-inverse: rgba(255, 255, 255, 0.9);
+    --ring-bottom-inverse: rgba(0, 0, 0, 0.16);
+
+    --ring-top-surface: rgba(255, 255, 255, 0.09);
+    --ring-bottom-surface: rgba(0, 0, 0, 0.4);
+
+    --success: #2ecc71;
+    --success-bg: rgba(46, 204, 113, 0.14);
+    --danger: #ff5c7c;
+    --danger-bg: rgba(255, 92, 124, 0.14);
+}
+
+html {
+    min-height: 100%;
+    background: var(--background);
+    color: var(--foreground);
+    color-scheme: light;
+    overflow-x: hidden;
+
+    transition:
+        background-color 200ms ease,
+        color 200ms ease;
+}
+
+html[data-theme="dark"] {
+    color-scheme: dark;
+}
+
+body {
+    min-height: 100vh;
+    width: 100%;
+    margin: 0;
+
+    background: var(--background);
+    color: var(--foreground);
+
+    font-family: var(--font-poppins), sans-serif;
+
+    overflow-x: hidden;
+
+    transition:
+        background-color 200ms ease,
+        color 200ms ease;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+button,
+a {
+    -webkit-tap-highlight-color: transparent;
+}
+
+button {
+    font-family: inherit;
+}
+
+img,
+svg {
+    max-width: 100%;
+}
+
+::selection {
+    background: var(--foreground);
+    color: var(--background);
+}
+
+/* =========================================================
+   Selaura Ring
+
+   A border whose color transitions from light (top) to dark
+   (bottom) around the whole shape, following the radius
+   exactly. Regular `border` can't do this — a solid gradient
+   painted as a border needs to be masked to a ring. Shared by
+   the buttons and surfaces below so they all bevel the same
+   way, no extra class needed on the elements themselves.
+   ========================================================= */
+
+.selaura-button-default,
+.selaura-button-muted,
+.selaura-surface {
+    position: relative;
+}
+
+.selaura-button-default::before {
+    background: linear-gradient(
+        180deg,
+        var(--ring-top-inverse),
+        var(--ring-bottom-inverse)
+    );
+}
+
+.selaura-button-muted::before {
+    background: linear-gradient(180deg, var(--ring-top), var(--ring-bottom));
+}
+
+.selaura-surface::before {
+    background: linear-gradient(
+        180deg,
+        var(--ring-top-surface),
+        var(--ring-bottom-surface)
+    );
+}
+
+.selaura-button-default::before,
+.selaura-button-muted::before,
+.selaura-surface::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    padding: 1px;
+
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+
+    pointer-events: none;
+}
+
+/* =========================================================
+   Selaura Buttons
+   ========================================================= */
+
+.selaura-button-default {
+    background: var(--foreground);
+    color: var(--background);
+    border: none;
+
+    box-shadow: 0 8px 20px var(--shadow);
+}
+
+.selaura-button-default:hover {
+    background: var(--foreground);
+    color: var(--background);
+
+    transform: scale(0.98);
+
+    box-shadow: 0 6px 16px var(--shadow);
+}
+
+.selaura-button-default:active {
+    background: var(--foreground);
+    color: var(--background);
+
+    transform: scale(0.96);
+}
+
+.selaura-button-default:disabled {
+    background: var(--surface);
+    color: var(--faint);
+
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+
+/* =========================================================
+   Outline
+   ========================================================= */
+
+.selaura-button-outline {
+    background: transparent;
+    color: var(--foreground);
+
+    border: 2px solid var(--foreground);
+}
+
+.selaura-button-outline:hover {
+    background: var(--foreground);
+    color: var(--background);
+
+    transform: scale(0.98);
+}
+
+.selaura-button-outline:active {
+    background: var(--foreground);
+    color: var(--background);
+
+    transform: scale(0.96);
+}
+
+.selaura-button-outline:disabled {
+    background: transparent;
+    color: var(--faint);
+
+    border-color: var(--border);
+
+    cursor: not-allowed;
+}
+
+
+/* =========================================================
+   Muted
+   ========================================================= */
+
+.selaura-button-muted {
+    background: var(--surface);
+    color: var(--foreground);
+
+    border: none;
+}
+
+.selaura-button-muted:hover {
+    background: var(--surface-hover);
+    color: var(--foreground);
+
+    transform: scale(0.98);
+}
+
+.selaura-button-muted:active {
+    background: var(--surface-hover);
+    color: var(--foreground);
+
+    transform: scale(0.96);
+}
+
+.selaura-button-muted:disabled {
+    background: var(--surface);
+    color: var(--faint);
+
+    cursor: not-allowed;
+}
+
+.selaura-button-muted:disabled::before {
+    display: none;
+}
+
+
+/* =========================================================
+   Footer
+   ========================================================= */
+
+.selaura-button-footer {
+    background: var(--background);
+    color: var(--foreground);
+
+    border: 2px solid transparent;
+
+    box-shadow: none;
+}
+
+.selaura-button-footer:hover {
+    background: var(--background);
+    color: var(--foreground);
+
+    opacity: 0.75;
+
+    transform: scale(0.98);
+}
+
+.selaura-button-footer:active {
+    background: var(--background);
+    color: var(--foreground);
+
+    transform: scale(0.96);
+}
+
+.selaura-button-footer:disabled {
+    background: var(--background);
+    color: var(--faint);
+
+    cursor: not-allowed;
+}
+
+
+/* =========================================================
+   Depth / Surface
+
+   Shared "raised" treatment for cards and bordered panels:
+   the selaura-ring bevel plus an outer drop shadow for
+   elevation. Use anywhere that should read as part of the
+   same family as the buttons above.
+   ========================================================= */
+
+.selaura-surface {
+    box-shadow: 0 8px 20px var(--shadow);
+}
+
+.selaura-surface:focus-within::before {
+    background: linear-gradient(180deg, var(--ring-top), var(--ring-bottom));
+}
+
+@keyframes selaura-marquee-left {
+    from {
+        transform: translate3d(0, 0, 0);
+    }
+
+    to {
+        transform: translate3d(-50%, 0, 0);
+    }
+}
+
+@keyframes selaura-marquee-right {
+    from {
+        transform: translate3d(-50%, 0, 0);
+    }
+
+    to {
+        transform: translate3d(0, 0, 0);
+    }
+}
+
+.animate-selaura-marquee-left {
+    animation: selaura-marquee-left 25s linear infinite;
+}
+
+.animate-selaura-marquee-right {
+    animation: selaura-marquee-right 25s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-selaura-marquee-left,
+    .animate-selaura-marquee-right {
+        animation: none;
+    }
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+    color: var(--faint);
+    font-style: italic;
+}
+ 
+.token.punctuation {
+    color: var(--muted);
+}
+ 
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+    color: #c1666b;
+}
+ 
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+    color: #5a9367;
+}
+ 
+.token.operator,
+.token.entity,
+.token.url {
+    color: var(--foreground);
+    opacity: 0.75;
+}
+ 
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+    color: #4d7ea8;
+}
+ 
+.token.function,
+.token.class-name {
+    color: #9b6bb3;
+}
+ 
+.token.regex,
+.token.important,
+.token.variable {
+    color: #c1666b;
+}

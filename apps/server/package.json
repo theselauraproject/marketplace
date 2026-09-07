@@ -1,0 +1,7 @@
+{
+    "name": "@selaura/server",
+    "private": true,
+    "scripts": {
+        "dev": "cargo watch -x run"
+    }
+}

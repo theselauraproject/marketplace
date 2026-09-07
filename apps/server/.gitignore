@@ -1,0 +1,15 @@
+/target
+
+.env
+.env.*
+!.env.example
+
+/uploads
+
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+**/*.rs.bk
+*.pdb
