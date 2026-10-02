@@ -7,12 +7,13 @@ import Button from "@/components/ui/Button";
 import { getProjects } from "@/lib/projects-api";
 import { FeaturedProjects } from "@/components/projects/FeaturedProjects";
 
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   const projects = await getProjects();
 
   return (
     <div className="w-full">
-      {}
 
       <section
         className={[
@@ -20,7 +21,6 @@ export default async function Home() {
           "border-b border-[var(--border)]",
         ].join(" ")}
       >
-        {}
 
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           <div
@@ -43,7 +43,6 @@ export default async function Home() {
           ].join(" ")}
         >
           <div className="mx-auto max-w-3xl text-center">
-            {}
 
             <h1
               className={[
@@ -68,13 +67,9 @@ export default async function Home() {
               one place.
             </p>
 
-            {}
-
             <div className="mx-auto mt-8 max-w-2xl">
               <SearchBar />
             </div>
-
-            {}
 
             <div
               className={[
@@ -100,8 +95,6 @@ export default async function Home() {
           </div>
         </div>
       </section>
-
-      {}
 
       <section className="mx-auto max-w-7xl px-5 py-12 sm:px-6 sm:py-16">
         <div
@@ -136,8 +129,6 @@ export default async function Home() {
 
         <FeaturedProjects projects={projects} />
       </section>
-
-      {}
 
       <section className="mx-auto max-w-7xl px-5 pb-16 sm:px-6 sm:pb-20">
         <div

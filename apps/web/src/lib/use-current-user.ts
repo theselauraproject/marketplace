@@ -58,6 +58,8 @@ export function useCurrentUser() {
 
     setUser(null);
     setActiveIdentity(null);
+
+    navigator.serviceWorker?.controller?.postMessage({ type: "clear-pages" });
   }, []);
 
   return {

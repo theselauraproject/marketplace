@@ -103,12 +103,6 @@ function Queue() {
 
   const [actingOn, setActingOn] = useState<string | null>(null);
 
-  /*
-   * Keyed by slug. Holds the in-progress note text for a
-   * reject/hide action that's waiting for the moderator to
-   * confirm, so the row can show an inline textarea instead of
-   * immediately firing the request.
-   */
   const [noteDrafts, setNoteDrafts] = useState<
     Record<string, { action: "rejected" | "hidden"; text: string }>
   >({});

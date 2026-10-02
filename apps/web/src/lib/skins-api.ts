@@ -35,6 +35,7 @@ export interface SkinAuthor {
   id: string;
   username: string;
   avatarUrl: string | null;
+  kind?: "user" | "org";
 }
 
 export interface Skin {
@@ -50,6 +51,7 @@ export interface Skin {
   downloads: number;
   createdAt: string;
   author: SkinAuthor;
+  uploader?: { id: string; username: string };
 }
 
 export interface SkinCredit {
@@ -59,11 +61,13 @@ export interface SkinCredit {
   kind: SkinKind;
   pieceSlot: SkinSlot | null;
   imageUrl: string;
-  author: { username: string };
+  author: { username: string; kind?: "user" | "org" };
 }
 
 export interface SkinDetail extends Skin {
   remixedFrom: SkinCredit[];
+  canManage?: boolean;
+  canFeature?: boolean;
 }
 
 export interface SkinFilter {
@@ -94,8 +98,12 @@ export async function getSkins(filter?: SkinFilter): Promise<Skin[]> {
   return data.skins;
 }
 
-export async function getSkinBySlug(slug: string): Promise<SkinDetail | null> {
+export async function getSkinBySlug(
+  slug: string,
+  cookieHeader?: string,
+): Promise<SkinDetail | null> {
   const response = await fetch(apiUrl(`/api/v1/skins/${slug}`), {
+    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
     cache: "no-store",
   });
 
@@ -170,8 +178,15 @@ export async function deleteSkin(slug: string): Promise<void> {
   }
 }
 
-export async function setFeaturedSkin(skinId: string | null): Promise<void> {
-  const response = await apiFetch("/api/v1/users/me/featured-skin", {
+export async function setFeaturedSkin(
+  skinId: string | null,
+  username?: string,
+): Promise<void> {
+  const path = username
+    ? `/api/v1/users/${encodeURIComponent(username)}/featured-skin`
+    : "/api/v1/users/me/featured-skin";
+
+  const response = await apiFetch(path, {
     method: "PATCH",
     body: JSON.stringify({ skinId }),
   });

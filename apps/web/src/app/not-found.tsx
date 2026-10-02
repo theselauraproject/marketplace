@@ -13,7 +13,6 @@ export default function NotFound() {
       ].join(" ")}
     >
       <div className="w-full max-w-xl text-center">
-        {}
 
         <div
           className={[
@@ -30,8 +29,6 @@ export default function NotFound() {
           <Compass size={26} strokeWidth={1.8} />
         </div>
 
-        {}
-
         <p
           className={[
             "text-xs font-semibold",
@@ -41,8 +38,6 @@ export default function NotFound() {
         >
           PAGE NOT FOUND
         </p>
-
-        {}
 
         <h1
           className={[
@@ -76,8 +71,6 @@ export default function NotFound() {
           The page you&apos;re looking for may have been moved, deleted, or
           never existed in the first place.
         </p>
-
-        {}
 
         <div
           className={[

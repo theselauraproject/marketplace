@@ -15,7 +15,9 @@ use tower_cookies::{
 use uuid::Uuid;
 
 use crate::{
-    current_user::{get_active_identity, require_user, SESSION_COOKIE},
+    current_user::{
+        get_active_identity, identity_user_ids, is_org_member, require_user, SESSION_COOKIE,
+    },
     error::{ApiError, ApiResult},
     github,
     models::{Organization, PublicUser, User},
@@ -48,12 +50,6 @@ fn github_authorize_url(state: &Arc<AppState>, oauth_state: &str) -> String {
         ),
         ("scope", OAUTH_SCOPE),
         ("state", oauth_state),
-        // Without this, GitHub silently re-authenticates as whichever
-        // account already has an active github.com session in the
-        // browser, so "Add account" just re-added the same account
-        // instead of letting the person pick a different one.
-        // `prompt=select_account` forces GitHub's account picker to show
-        // every time, even when there's only one signed-in session.
         ("prompt", "select_account"),
     ];
 
@@ -136,22 +132,30 @@ async fn upsert_github_user(
 }
 
 async fn sync_organizations(state: &AppState, user_id: Uuid, access_token: &str) {
-    let orgs = github::get_github_orgs(access_token).await;
+    let Some(orgs) = github::get_github_orgs(access_token).await else {
+        tracing::warn!("couldn't fetch GitHub organizations; keeping existing memberships");
+        return;
+    };
+
+    let mut synced_org_ids: Vec<Uuid> = Vec::new();
 
     for org in orgs {
         let github_id = org.id.to_string();
 
         let result: sqlx::Result<Uuid> = async {
             let row = sqlx::query(
-                "INSERT INTO organizations (github_id, login, avatar_url) \
-                 VALUES ($1, $2, $3) \
+                "INSERT INTO organizations (github_id, login, avatar_url, bio) \
+                 VALUES ($1, $2, $3, $4) \
                  ON CONFLICT (github_id) DO UPDATE SET \
-                    login = EXCLUDED.login, avatar_url = EXCLUDED.avatar_url, updated_at = now() \
+                    login = EXCLUDED.login, avatar_url = EXCLUDED.avatar_url, \
+                    bio = COALESCE(organizations.bio, EXCLUDED.bio), \
+                    updated_at = now() \
                  RETURNING id",
             )
             .bind(&github_id)
             .bind(&org.login)
             .bind(&org.avatar_url)
+            .bind(org.description.as_deref().map(|d| d.chars().take(280).collect::<String>()).filter(|d| !d.trim().is_empty()))
             .fetch_one(&state.pool)
             .await?;
 
@@ -177,7 +181,21 @@ async fn sync_organizations(state: &AppState, user_id: Uuid, access_token: &str)
         .await
         {
             tracing::warn!("failed to record org membership for {github_id}: {err}");
+        } else {
+            synced_org_ids.push(org_id);
         }
+    }
+
+    if let Err(err) = sqlx::query(
+        "DELETE FROM organization_members \
+         WHERE user_id = $1 AND NOT (org_id = ANY($2))",
+    )
+    .bind(user_id)
+    .bind(&synced_org_ids)
+    .execute(&state.pool)
+    .await
+    {
+        tracing::warn!("failed to prune stale org memberships: {err}");
     }
 }
 
@@ -304,14 +322,16 @@ pub async fn list_accounts(
     .fetch_all(&state.pool)
     .await?;
 
+    let identity_ids = identity_user_ids(&state.pool, user.id).await?;
+
     let orgs: Vec<Organization> = sqlx::query_as(
-        "SELECT o.id, o.github_id, o.login, o.name, o.avatar_url \
+        "SELECT DISTINCT o.id, o.github_id, o.login, o.name, o.avatar_url \
          FROM organization_members om \
          JOIN organizations o ON o.id = om.org_id \
-         WHERE om.user_id = $1 \
+         WHERE om.user_id = ANY($1) \
          ORDER BY o.login",
     )
-    .bind(user.id)
+    .bind(&identity_ids)
     .fetch_all(&state.pool)
     .await?;
 
@@ -395,14 +415,7 @@ pub async fn switch_account(
             set_acting_as(&state.pool, &session_id, acting_as_user_id, None).await?;
         }
         "org" => {
-            let is_member = sqlx::query(
-                "SELECT 1 FROM organization_members WHERE org_id = $1 AND user_id = $2",
-            )
-            .bind(id)
-            .bind(user.id)
-            .fetch_optional(&state.pool)
-            .await?
-            .is_some();
+            let is_member = is_org_member(&state.pool, id, user.id).await?;
 
             if !is_member {
                 return Err(ApiError::forbidden(
@@ -422,10 +435,6 @@ pub async fn switch_account(
     Ok(Json(json!({ "activeIdentity": active_identity })))
 }
 
-/// Unlinks a linked GitHub account from the current user. This only removes
-/// the local link between the two Selaura accounts — it doesn't touch
-/// anything on GitHub's side, so the other account can always be re-linked
-/// later by signing in and linking again.
 pub async fn unlink_account(
     State(state): State<Arc<AppState>>,
     cookies: Cookies,
@@ -462,8 +471,6 @@ pub async fn unlink_account(
         return Err(ApiError::not_found("That account isn't linked to yours"));
     }
 
-    // If we were currently posting as the account we just unlinked, fall
-    // back to the primary account rather than leaving a dangling identity.
     if session.acting_as_user_id == Some(id) {
         set_acting_as(&state.pool, &session_id, None, None).await?;
     }
@@ -473,10 +480,6 @@ pub async fn unlink_account(
     Ok(Json(json!({ "success": true, "activeIdentity": active_identity })))
 }
 
-/// Removes a GitHub organization from the current user's account switcher.
-/// This only clears Selaura's local record of the membership — if the user
-/// is still actually a member on GitHub, the next time they sign in with
-/// GitHub the organization will be re-synced and reappear.
 pub async fn leave_organization(
     State(state): State<Arc<AppState>>,
     cookies: Cookies,
@@ -493,11 +496,13 @@ pub async fn leave_organization(
         .await?
         .ok_or_else(|| ApiError::unauthorized("Session expired"))?;
 
+    let identity_ids = identity_user_ids(&state.pool, user.id).await?;
+
     let result = sqlx::query(
-        "DELETE FROM organization_members WHERE org_id = $1 AND user_id = $2",
+        "DELETE FROM organization_members WHERE org_id = $1 AND user_id = ANY($2)",
     )
     .bind(id)
-    .bind(user.id)
+    .bind(&identity_ids)
     .execute(&state.pool)
     .await?;
 

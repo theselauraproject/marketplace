@@ -1,11 +1,21 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+export function publicApiUrl(path: string): string {
+  return `${PUBLIC_API_URL}${path}`;
+}
 
 export function apiUrl(path: string): string {
-  if (!API_URL) {
-    throw new Error("NEXT_PUBLIC_API_URL is not set");
+  if (typeof window === "undefined") {
+    const base = process.env.API_INTERNAL_URL || PUBLIC_API_URL;
+
+    if (!base) {
+      throw new Error("Set API_INTERNAL_URL or NEXT_PUBLIC_API_URL");
+    }
+
+    return `${base}${path}`;
   }
 
-  return `${API_URL}${path}`;
+  return publicApiUrl(path);
 }
 
 export async function apiFetch(
@@ -17,6 +27,7 @@ export async function apiFetch(
   return fetch(apiUrl(path), {
     ...init,
     credentials: "include",
+    cache: "no-store",
     headers: {
       ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(init?.headers ?? {}),

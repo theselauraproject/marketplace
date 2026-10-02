@@ -4,14 +4,10 @@ import { useEffect, useRef } from "react";
 import type { SkinViewer as SkinViewerInstance } from "skinview3d";
 import type * as ThreeModule from "three";
 
+import { toDataUrl } from "@/lib/skin-image";
+
 export type SkinViewerModel = "default" | "slim" | "auto-detect";
 
-/**
- * Which part of the model the camera settles on. "full" keeps the normal
- * head-to-toe framing; everything else dollies in on that body part, for
- * previewing a single piece layer (hair, a sleeve, etc) where the rest of
- * the model isn't the point.
- */
 export type SkinViewerFocus =
   | "full"
   | "head"
@@ -21,87 +17,135 @@ export type SkinViewerFocus =
   | "legs";
 
 interface SkinViewer3DProps {
-  /** A skin texture URL — an https:// URL or a data: URL both work. */
   src: string;
   model?: SkinViewerModel;
   focus?: SkinViewerFocus;
   width?: number;
   height?: number;
   className?: string;
-  /** Whether drag-to-orbit/scroll-to-zoom respond to pointer input. */
   interactive?: boolean;
 }
 
-// How far the legs are splayed apart for the static display pose, in
-// radians — a subtle "standing on a pedestal" stance rather than the
-// default feet-together pose or a walking animation.
 const LIMB_SPLAY = 0.35;
 
-// How close the camera dollies in for each focus target, as a fraction of
-// the default head-to-toe viewing distance.
 const FOCUS_DISTANCE_FACTOR: Record<Exclude<SkinViewerFocus, "full">, number> = {
-  head: 0.32,
+  head: 0.5,
   body: 0.5,
   "left-arm": 0.42,
   "right-arm": 0.42,
   legs: 0.48,
 };
 
+const HEAD_FOCUS_YAW = Math.PI / 4;
+
+interface HomeCamera {
+  position: ThreeModule.Vector3;
+  target: ThreeModule.Vector3;
+}
+
 function applyFocus(
   viewer: SkinViewerInstance,
   three: typeof ThreeModule,
   focus: SkinViewerFocus,
+  home: HomeCamera,
 ) {
-  if (focus === "full") {
-    return;
-  }
+  viewer.controls.minDistance = 0;
+  viewer.controls.maxDistance = Infinity;
+  viewer.controls.target.copy(home.target);
+  viewer.camera.position.copy(home.position);
+  viewer.controls.update();
 
   const skin = viewer.playerObject.skin as unknown as Record<
     string,
     ThreeModule.Object3D
   >;
 
-  let worldPos: ThreeModule.Vector3 | null = null;
+  const allParts = ["head", "body", "leftArm", "rightArm", "leftLeg", "rightLeg"];
 
-  if (focus === "legs") {
-    const left = new three.Vector3();
-    const right = new three.Vector3();
-
-    skin.leftLeg?.getWorldPosition(left);
-    skin.rightLeg?.getWorldPosition(right);
-
-    worldPos = left.add(right).multiplyScalar(0.5);
-  } else {
-    const partKey =
-      focus === "left-arm"
-        ? "leftArm"
-        : focus === "right-arm"
-          ? "rightArm"
-          : focus;
-
-    const part = skin[partKey];
-    if (!part) {
-      return;
+  if (focus === "full") {
+    for (const key of allParts) {
+      const part = skin[key];
+      if (part) part.visible = true;
     }
-
-    worldPos = new three.Vector3();
-    part.getWorldPosition(worldPos);
-  }
-
-  if (!worldPos) {
+    skin.head?.rotation.set(0, 0, 0);
+    setDistanceLimits(viewer);
     return;
   }
 
-  const direction = viewer.camera.position.clone().sub(viewer.controls.target);
-  const baseDistance = direction.length();
-  direction.normalize();
+  const partsToShow: string[] =
+    focus === "legs"
+      ? ["leftLeg", "rightLeg"]
+      : focus === "left-arm"
+        ? ["leftArm"]
+        : focus === "right-arm"
+          ? ["rightArm"]
+          : focus === "body"
+            ? ["body"]
+            : ["head"];
 
-  viewer.controls.target.copy(worldPos);
+  for (const key of allParts) {
+    const part = skin[key];
+    if (part) part.visible = partsToShow.includes(key);
+  }
+
+  skin.head?.rotation.set(0, focus === "head" ? HEAD_FOCUS_YAW : 0, 0);
+
+  viewer.playerObject.updateMatrixWorld(true);
+
+  const box = new three.Box3();
+  for (const key of partsToShow) {
+    const part = skin[key];
+    if (part) box.expandByObject(part);
+  }
+
+  if (box.isEmpty()) {
+    setDistanceLimits(viewer);
+    return;
+  }
+
+  const center = box.getCenter(new three.Vector3());
+
+  const baseDistance = home.position.distanceTo(home.target);
+
+  const direction =
+    focus === "head"
+      ? new three.Vector3(0, 0.08, 1).normalize()
+      : home.position.clone().sub(home.target).normalize();
+
+  viewer.controls.target.copy(center);
   viewer.camera.position
-    .copy(worldPos)
+    .copy(center)
     .add(direction.multiplyScalar(baseDistance * FOCUS_DISTANCE_FACTOR[focus]));
 
   viewer.controls.update();
+  setDistanceLimits(viewer);
+}
+
+function setDistanceLimits(viewer: SkinViewerInstance) {
+  const restingDistance = viewer.camera.position.distanceTo(
+    viewer.controls.target,
+  );
+
+  viewer.controls.minDistance = restingDistance * 0.6;
+  viewer.controls.maxDistance = restingDistance * 2;
+}
+
+async function applyTexture(
+  viewer: SkinViewerInstance,
+  src: string,
+  model: SkinViewerModel,
+  isStale: () => boolean,
+) {
+  try {
+    const url = await toDataUrl(src);
+
+    if (isStale()) {
+      return;
+    }
+
+    await viewer.loadSkin(url, { model });
+  } catch {
+  }
 }
 
 export function SkinViewer3D({
@@ -115,8 +159,16 @@ export function SkinViewer3D({
 }: SkinViewer3DProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewerRef = useRef<SkinViewerInstance | null>(null);
+  const threeRef = useRef<typeof ThreeModule | null>(null);
+  const homeRef = useRef<HomeCamera | null>(null);
+  const textureRequestRef = useRef(0);
 
-  // Set up the viewer once on mount.
+  const latestRef = useRef({ src, model, focus, interactive, width, height });
+
+  useEffect(() => {
+    latestRef.current = { src, model, focus, interactive, width, height };
+  });
+
   useEffect(() => {
     let cancelled = false;
 
@@ -126,43 +178,42 @@ export function SkinViewer3D({
           return;
         }
 
+        const initial = latestRef.current;
+
         const viewer = new SkinViewer({
           canvas: canvasRef.current,
-          width,
-          height,
+          width: initial.width,
+          height: initial.height,
           zoom: 0.85,
         });
 
-        // Static display pose — no walking animation, no auto-rotate.
-        // Splay the legs apart a little so it reads as a deliberate
-        // stance rather than the bare default rest pose.
         const { leftArm, rightArm, leftLeg, rightLeg } = viewer.playerObject.skin;
         leftArm.rotation.x = -LIMB_SPLAY;
         rightArm.rotation.x = LIMB_SPLAY;
         leftLeg.rotation.x = -LIMB_SPLAY;
         rightLeg.rotation.x = LIMB_SPLAY;
 
-        // Keep zoom within a sane range relative to the default distance,
-        // instead of letting it dolly in/out indefinitely.
-        const defaultDistance = viewer.camera.position.distanceTo(
-          viewer.controls.target,
-        );
-        viewer.controls.minDistance = defaultDistance * 0.6;
-        viewer.controls.maxDistance = defaultDistance * 2;
-        viewer.controls.enabled = interactive;
+        threeRef.current = three;
+        homeRef.current = {
+          position: viewer.camera.position.clone(),
+          target: viewer.controls.target.clone(),
+        };
+
+        applyFocus(viewer, three, initial.focus, homeRef.current);
+
+        viewer.controls.enabled = initial.interactive;
         viewer.controls.enableZoom = false;
-
-        applyFocus(viewer, three, focus);
-
-        // A faint checkered ground plane under the feet, for a sense of
-        // "standing on something" without any actual walking.
 
         viewerRef.current = viewer;
 
-        viewer.loadSkin(src, { model }).catch(() => {
-          // Not a valid skin texture — leave the viewer showing nothing
-          // rather than throwing.
-        });
+        const requestId = ++textureRequestRef.current;
+
+        applyTexture(
+          viewer,
+          initial.src,
+          initial.model,
+          () => textureRequestRef.current !== requestId,
+        );
       },
     );
 
@@ -171,18 +222,38 @@ export function SkinViewer3D({
       viewerRef.current?.dispose();
       viewerRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reload the texture whenever the source changes, without tearing down
-  // the WebGL context (keeps the camera angle stable while remixing).
+  useEffect(() => {
+    viewerRef.current?.setSize(width, height);
+  }, [width, height]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const three = threeRef.current;
+    const home = homeRef.current;
+
+    if (!viewer || !three || !home) {
+      return;
+    }
+
+    applyFocus(viewer, three, focus, home);
+  }, [focus]);
+
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) {
       return;
     }
 
-    viewer.loadSkin(src, { model }).catch(() => {});
+    const requestId = ++textureRequestRef.current;
+
+    applyTexture(
+      viewer,
+      src,
+      model,
+      () => textureRequestRef.current !== requestId,
+    );
   }, [src, model]);
 
   return (

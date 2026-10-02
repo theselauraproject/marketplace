@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Download } from "lucide-react";
+import { Download, Heart } from "lucide-react";
 
 import type { Project } from "@selaura/types";
 
@@ -13,13 +13,13 @@ interface ProjectCardProps {
 export function ProjectCard({ project }: ProjectCardProps) {
   return (
     <Link href={`/projects/${project.slug}`} className="group block h-full">
-      {}
       <div
         className={[
           "h-full",
           "overflow-visible",
           "transition-transform",
           "duration-300 ease-out",
+          "will-change-transform",
           "group-hover:-translate-y-1",
         ].join(" ")}
       >
@@ -160,11 +160,22 @@ export function ProjectCard({ project }: ProjectCardProps) {
                 by {project.author.username}
               </span>
 
-              <span className="shrink-0 inline-flex items-center gap-1 leading-none">
-                <Download className="h-3 w-3 shrink-0 self-center" />
-                <span className="self-center">
-                  {project.downloads.toLocaleString()}
+              <span className="shrink-0 inline-flex items-center gap-2 leading-none">
+                <span className="inline-flex items-center gap-1">
+                  <Download className="h-3 w-3 shrink-0 self-center" />
+                  <span className="self-center">
+                    {project.downloads.toLocaleString()}
+                  </span>
                 </span>
+
+                {typeof project.likesCount === "number" && project.likesCount > 0 && (
+                  <span className="inline-flex items-center gap-1">
+                    <Heart className="h-3 w-3 shrink-0 self-center" />
+                    <span className="self-center">
+                      {project.likesCount.toLocaleString()}
+                    </span>
+                  </span>
+                )}
               </span>
             </div>
           </div>

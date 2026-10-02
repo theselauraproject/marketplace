@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Plus, User, X } from "lucide-react";
 
@@ -14,6 +15,7 @@ import {
   type ActiveIdentity,
 } from "@/lib/accounts-api";
 import { useToast } from "@/components/ui/Toast";
+import { profileHref } from "@/lib/profile-links";
 
 interface AccountSwitcherProps {
   currentUser: { id: string; username: string };
@@ -31,6 +33,7 @@ export function AccountSwitcher({
   const [switching, setSwitching] = useState(false);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
 
+  const router = useRouter();
   const showToast = useToast();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -81,8 +84,18 @@ export function AccountSwitcher({
     setSwitching(true);
 
     try {
-      await switchAccount(account.kind, account.id);
+      const identity = await switchAccount(account.kind, account.id);
       onSwitched();
+
+      router.push(
+        profileHref({ username: identity.username, kind: identity.kind }),
+      );
+      router.refresh();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Couldn't switch account",
+        "warning",
+      );
     } finally {
       setSwitching(false);
       setOpen(false);
@@ -255,7 +268,11 @@ export function AccountSwitcher({
           <div className="my-1 h-px bg-[var(--border)]" />
 
           <Link
-            href={`/u/${currentUser.username}`}
+            href={
+              activeIdentity?.kind === "org"
+                ? `/org/${activeIdentity.username}`
+                : `/u/${activeIdentity?.username ?? currentUser.username}`
+            }
             onClick={() => setOpen(false)}
             className={[
               "flex w-full items-center gap-2",
@@ -267,7 +284,9 @@ export function AccountSwitcher({
             ].join(" ")}
           >
             <User size={14} />
-            View profile
+            {activeIdentity?.kind === "org"
+              ? "View organization"
+              : "View profile"}
           </Link>
 
           <a

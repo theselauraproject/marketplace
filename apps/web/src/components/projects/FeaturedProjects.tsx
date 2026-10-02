@@ -61,7 +61,6 @@ export function FeaturedProjects({ projects }: FeaturedProjectsProps) {
 
   return (
     <div className={["relative -mx-5", "sm:-mx-6"].join(" ")}>
-      {}
 
       <div
         aria-hidden="true"
@@ -71,8 +70,6 @@ export function FeaturedProjects({ projects }: FeaturedProjectsProps) {
             "linear-gradient(to right, var(--background), transparent)",
         }}
       />
-
-      {}
 
       <div
         aria-hidden="true"

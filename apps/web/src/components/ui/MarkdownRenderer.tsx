@@ -85,7 +85,6 @@ export function MarkdownRenderer({ children }: { children: string }) {
 
           img: ({ src, alt }) => (
             <span className="my-5 block">
-              {}
               <img
                 src={src}
                 alt={alt ?? ""}

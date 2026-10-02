@@ -12,26 +12,12 @@ import { Card } from "@/components/ui/Card";
 import { SkinViewer3D } from "@/components/skins/SkinViewer3D";
 import { setFeaturedSkin } from "@/lib/skins-api";
 import { updateProfile, type UserProfile } from "@/lib/users-api";
+import { inputClass } from "@/components/ui/fields";
+import { SocialLink } from "@/components/ui/SocialLink";
 
 interface ProfileHeaderProps {
   profile: UserProfile;
 }
-
-const inputClass = [
-  "w-full",
-  "rounded-xl",
-  "border border-[var(--border)]",
-  "bg-[var(--background)]",
-  "px-3.5 py-2.5",
-  "text-sm",
-  "text-[var(--foreground)]",
-  "outline-none",
-  "transition",
-  "placeholder:text-[var(--faint)]",
-  "focus:border-[var(--foreground)]/30",
-  "focus:ring-2",
-  "focus:ring-[var(--foreground)]/5",
-].join(" ");
 
 export function ProfileHeader({ profile }: ProfileHeaderProps) {
   const router = useRouter();
@@ -67,7 +53,11 @@ export function ProfileHeader({ profile }: ProfileHeaderProps) {
     setError(null);
 
     try {
-      const updated = await updateProfile({ bio, discordUrl, websiteUrl });
+      const updated = await updateProfile(user.username, {
+        bio,
+        discordUrl,
+        websiteUrl,
+      });
       setUser(updated);
       setEditing(false);
       router.refresh();
@@ -82,10 +72,9 @@ export function ProfileHeader({ profile }: ProfileHeaderProps) {
     setUnfeaturing(true);
 
     try {
-      await setFeaturedSkin(null);
+      await setFeaturedSkin(null, user.username);
       setFeaturedSkinState(null);
     } catch {
-      // Leave the featured skin shown as-is if this fails.
     } finally {
       setUnfeaturing(false);
     }
@@ -173,6 +162,7 @@ export function ProfileHeader({ profile }: ProfileHeaderProps) {
                   src={featuredSkin.imageUrl}
                   width={110}
                   height={140}
+                  interactive={false}
                 />
               </Link>
 
@@ -272,36 +262,5 @@ export function ProfileHeader({ profile }: ProfileHeaderProps) {
         </div>
       )}
     </Card>
-  );
-}
-
-function SocialLink({
-  href,
-  icon,
-  label,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={[
-        "inline-flex items-center gap-1.5",
-        "rounded-lg border border-[var(--border)]",
-        "px-2.5 py-1.5",
-        "text-xs font-medium",
-        "text-[var(--foreground)]/60",
-        "transition",
-        "hover:border-[var(--foreground)]/20",
-        "hover:text-[var(--foreground)]",
-      ].join(" ")}
-    >
-      {icon}
-      {label}
-    </a>
   );
 }

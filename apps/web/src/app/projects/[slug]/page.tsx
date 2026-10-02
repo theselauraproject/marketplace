@@ -1,14 +1,17 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Download, ShieldAlert } from "lucide-react";
+import { Download, ShieldAlert, User } from "lucide-react";
 
 import { ProjectTypeBadge } from "@/components/projects/ProjectTypeBadge";
+import { ProjectOwnerActions } from "@/components/projects/ProjectOwnerActions";
+import { VersionsList } from "@/components/projects/VersionsList";
+import { LikeButton } from "@/components/projects/LikeButton";
 import { MarkdownRenderer } from "@/components/ui/MarkdownRenderer";
 import { Card } from "@/components/ui/Card";
-import Button from "@/components/ui/Button";
+import { DownloadButton } from "@/components/ui/DownloadButton";
 import { getProjectBySlug } from "@/lib/projects-api";
+import { getCookieHeader } from "@/lib/server-cookies";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +20,7 @@ interface PageProps {
 }
 
 async function loadProject(slug: string) {
-  const cookieStore = await cookies();
-
-  const cookieHeader = cookieStore
-    .getAll()
-    .map((cookie) => `${cookie.name}=${cookie.value}`)
-    .join("; ");
+  const cookieHeader = await getCookieHeader();
 
   return getProjectBySlug(slug, cookieHeader);
 }
@@ -77,7 +75,7 @@ export default async function ProjectPage({ params }: PageProps) {
       <div className="mx-auto w-full max-w-7xl px-5 sm:px-6">
         <div className="relative grid gap-8 pb-16 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0">
-            <div className="-mt-10 mb-5 flex items-end gap-4 sm:-mt-12">
+            <div className="-mt-8 mb-5 inline-flex max-w-full items-end gap-4 rounded-2xl">
               <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border-4 border-[var(--background)] bg-[var(--background)] shadow-md sm:h-24 sm:w-24">
                 {project.iconUrl ? (
                   <img
@@ -104,14 +102,40 @@ export default async function ProjectPage({ params }: PageProps) {
                 <Link
                   href={
                     project.author.kind === "org"
-                      ? "#"
+                      ? `/org/${project.author.username}`
                       : `/u/${project.author.username}`
                   }
-                  className="text-sm text-[var(--foreground)]/50 transition hover:text-[var(--foreground)]"
+                  className="inline-flex items-center gap-1.5 text-sm text-[var(--foreground)]/50 transition hover:text-[var(--foreground)]"
                 >
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--surface-hover)]">
+                    {project.author.avatarUrl ? (
+                      <img
+                        src={project.author.avatarUrl}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <User size={10} className="text-[var(--faint)]" />
+                    )}
+                  </span>
                   by {project.author.username}
                 </Link>
               </div>
+            </div>
+
+            <p className="mb-4 text-sm leading-6 text-[var(--foreground)]/70">
+              {project.description}
+            </p>
+
+            <div className="flex gap-2 mb-6">
+              {project.canManage && (
+                <ProjectOwnerActions slug={project.slug} name={project.name} />
+              )}
+                <LikeButton
+                  slug={project.slug}
+                  initialLiked={project.likedByMe ?? false}
+                  initialCount={project.likesCount ?? 0}
+                />
             </div>
 
             {project.status && project.status !== "approved" && (
@@ -127,10 +151,6 @@ export default async function ProjectPage({ params }: PageProps) {
                 </div>
               </div>
             )}
-
-            <p className="mb-6 text-sm leading-6 text-[var(--foreground)]/70">
-              {project.description}
-            </p>
 
             {project.tags && project.tags.length > 0 && (
               <div className="mb-6 flex flex-wrap gap-1.5">
@@ -157,13 +177,13 @@ export default async function ProjectPage({ params }: PageProps) {
           <div className="space-y-4 lg:pt-[4.5rem]">
             {latest && (
               <Card className="p-4">
-                <Button
-                  href={latest.downloadUrl}
+                <DownloadButton
+                  url={latest.downloadUrl}
                   className="w-full"
                   icon={<Download size={15} />}
                 >
                   Download {latest.version}
-                </Button>
+                </DownloadButton>
 
                 <p className="mt-2 text-center text-xs text-[var(--foreground)]/40">
                   {formatFileSize(latest.fileSize)} ·{" "}
@@ -177,23 +197,7 @@ export default async function ProjectPage({ params }: PageProps) {
                 Versions
               </p>
 
-              <div className="space-y-1">
-                {versions.map((version) => (
-                  <a
-                    key={version.id}
-                    href={version.downloadUrl}
-                    className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-sm transition hover:bg-[var(--surface)]"
-                  >
-                    <span className="min-w-0 truncate font-medium">
-                      {version.version}
-                    </span>
-
-                    <span className="shrink-0 text-xs text-[var(--foreground)]/40">
-                      {new Date(version.createdAt).toLocaleDateString()}
-                    </span>
-                  </a>
-                ))}
-              </div>
+              <VersionsList versions={versions} />
             </Card>
 
             {latest?.gameVersions && latest.gameVersions.length > 0 && (
@@ -212,6 +216,42 @@ export default async function ProjectPage({ params }: PageProps) {
                     </span>
                   ))}
                 </div>
+              </Card>
+            )}
+
+            {(project.createdAt || project.updatedAt) && (
+              <Card className="space-y-1.5 p-4">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--foreground)]/40">
+                  Details
+                </p>
+
+                {project.createdAt && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-[var(--foreground)]/40">Created</span>
+                    <span className="text-[var(--foreground)]/70">
+                      {new Date(project.createdAt).toLocaleDateString(undefined, {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  </div>
+                )}
+
+                {project.updatedAt && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-[var(--foreground)]/40">
+                      Last updated
+                    </span>
+                    <span className="text-[var(--foreground)]/70">
+                      {new Date(project.updatedAt).toLocaleDateString(undefined, {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  </div>
+                )}
               </Card>
             )}
           </div>

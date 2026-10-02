@@ -43,3 +43,7 @@ generated/
 
 .vercel/
 .cache/
+
+.open-next/
+.wrangler/
+.dev.vars

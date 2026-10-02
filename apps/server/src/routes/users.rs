@@ -12,14 +12,12 @@ use tower_cookies::Cookies;
 use uuid::Uuid;
 
 use crate::{
-    current_user::{get_current_user, require_user},
+    current_user::{get_current_user, is_same_person, require_user},
     error::{ApiError, ApiResult},
     models::{PublicUser, User},
+    validation::{clean_text, clean_url, MAX_BIO_LENGTH},
     AppState,
 };
-
-const MAX_BIO_LENGTH: usize = 280;
-const MAX_URL_LENGTH: usize = 300;
 
 struct ProfileProjectRow {
     id: Uuid,
@@ -75,10 +73,6 @@ impl FromRow<'_, PgRow> for FeaturedSkinRow {
     }
 }
 
-/// Public profile for a user: their account info plus the projects they
-/// personally authored (not projects owned by an organization they belong
-/// to). Anyone can view this; only the profile's owner and staff see
-/// non-approved projects.
 pub async fn get_user_profile(
     State(state): State<Arc<AppState>>,
     cookies: Cookies,
@@ -99,10 +93,10 @@ pub async fn get_user_profile(
 
     let viewer = get_current_user(&state.pool, &cookies).await?;
 
-    let is_self = viewer
-        .as_ref()
-        .map(|v| v.id == profile_user.id)
-        .unwrap_or(false);
+    let is_self = match &viewer {
+        Some(v) => is_same_person(&state.pool, v.id, profile_user.id).await?,
+        None => false,
+    };
 
     let is_staff_viewer = viewer.as_ref().map(|v| v.is_staff()).unwrap_or(false);
 
@@ -202,46 +196,36 @@ pub struct UpdateProfileBody {
     website_url: Option<String>,
 }
 
-fn clean_text(value: Option<String>, max_len: usize) -> Option<String> {
-    value
-        .map(|v| v.trim().chars().take(max_len).collect::<String>())
-        .filter(|v| !v.is_empty())
+async fn resolve_editable_user(
+    state: &AppState,
+    cookies: &Cookies,
+    username: &str,
+) -> ApiResult<User> {
+    let session_user = require_user(&state.pool, cookies).await?;
+
+    let target: Option<User> = sqlx::query_as::<_, User>(
+        "SELECT id, github_id, username, email, avatar_url, role::text as role, \
+                bio, discord_url, website_url, created_at, updated_at \
+         FROM users WHERE lower(username) = lower($1)",
+    )
+    .bind(username)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let target = target.ok_or_else(|| ApiError::not_found("User not found"))?;
+
+    if !is_same_person(&state.pool, session_user.id, target.id).await? {
+        return Err(ApiError::forbidden("You can only edit your own profile"));
+    }
+
+    Ok(target)
 }
 
-fn clean_url(value: Option<String>) -> ApiResult<Option<String>> {
-    let Some(raw) = value else {
-        return Ok(None);
-    };
-
-    let trimmed = raw.trim();
-
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-
-    if trimmed.chars().count() > MAX_URL_LENGTH {
-        return Err(ApiError::bad_request("Link is too long"));
-    }
-
-    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
-        return Err(ApiError::bad_request(
-            "Links must start with http:// or https://",
-        ));
-    }
-
-    Ok(Some(trimmed.to_string()))
-}
-
-/// Updates the signed-in user's own public profile (bio + featured social
-/// links). Always overwrites all three fields — send the current value back
-/// for anything you don't want to change.
-pub async fn update_profile(
-    State(state): State<Arc<AppState>>,
-    cookies: Cookies,
-    Json(body): Json<UpdateProfileBody>,
+async fn apply_profile_update(
+    state: &AppState,
+    target_id: Uuid,
+    body: UpdateProfileBody,
 ) -> ApiResult<Json<Value>> {
-    let user = require_user(&state.pool, &cookies).await?;
-
     let bio = clean_text(body.bio, MAX_BIO_LENGTH);
     let discord_url = clean_url(body.discord_url)?;
     let website_url = clean_url(body.website_url)?;
@@ -255,11 +239,32 @@ pub async fn update_profile(
     .bind(&bio)
     .bind(&discord_url)
     .bind(&website_url)
-    .bind(user.id)
+    .bind(target_id)
     .fetch_one(&state.pool)
     .await?;
 
     Ok(Json(json!({ "user": PublicUser::from(&updated) })))
+}
+
+pub async fn update_profile(
+    State(state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Json(body): Json<UpdateProfileBody>,
+) -> ApiResult<Json<Value>> {
+    let user = require_user(&state.pool, &cookies).await?;
+
+    apply_profile_update(&state, user.id, body).await
+}
+
+pub async fn update_user_profile(
+    State(state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(username): Path<String>,
+    Json(body): Json<UpdateProfileBody>,
+) -> ApiResult<Json<Value>> {
+    let target = resolve_editable_user(&state, &cookies, &username).await?;
+
+    apply_profile_update(&state, target.id, body).await
 }
 
 #[derive(Deserialize)]
@@ -268,8 +273,37 @@ pub struct SetFeaturedSkinBody {
     skin_id: Option<Uuid>,
 }
 
-/// Sets (or clears, with `skinId: null`) the skin featured on the current
-/// user's public profile. Must be one of the user's own skins.
+async fn apply_featured_skin(
+    state: &AppState,
+    target_id: Uuid,
+    skin_id: Option<Uuid>,
+) -> ApiResult<Json<Value>> {
+    if let Some(skin_id) = skin_id {
+        let owned: Option<(Uuid,)> =
+            sqlx::query_as(
+                "SELECT id FROM skins WHERE id = $1 AND author_id = $2 AND kind = 'full'",
+            )
+            .bind(skin_id)
+            .bind(target_id)
+            .fetch_optional(&state.pool)
+            .await?;
+
+        if owned.is_none() {
+            return Err(ApiError::bad_request(
+                "You can only feature a full skin you uploaded",
+            ));
+        }
+    }
+
+    sqlx::query("UPDATE users SET featured_skin_id = $1, updated_at = now() WHERE id = $2")
+        .bind(skin_id)
+        .bind(target_id)
+        .execute(&state.pool)
+        .await?;
+
+    Ok(Json(json!({ "success": true })))
+}
+
 pub async fn set_featured_skin(
     State(state): State<Arc<AppState>>,
     cookies: Cookies,
@@ -277,26 +311,16 @@ pub async fn set_featured_skin(
 ) -> ApiResult<Json<Value>> {
     let user = require_user(&state.pool, &cookies).await?;
 
-    if let Some(skin_id) = body.skin_id {
-        let owned: Option<(Uuid,)> =
-            sqlx::query_as("SELECT id FROM skins WHERE id = $1 AND author_id = $2")
-                .bind(skin_id)
-                .bind(user.id)
-                .fetch_optional(&state.pool)
-                .await?;
+    apply_featured_skin(&state, user.id, body.skin_id).await
+}
 
-        if owned.is_none() {
-            return Err(ApiError::bad_request(
-                "You can only feature a skin you've uploaded",
-            ));
-        }
-    }
+pub async fn set_user_featured_skin(
+    State(state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(username): Path<String>,
+    Json(body): Json<SetFeaturedSkinBody>,
+) -> ApiResult<Json<Value>> {
+    let target = resolve_editable_user(&state, &cookies, &username).await?;
 
-    sqlx::query("UPDATE users SET featured_skin_id = $1, updated_at = now() WHERE id = $2")
-        .bind(body.skin_id)
-        .bind(user.id)
-        .execute(&state.pool)
-        .await?;
-
-    Ok(Json(json!({ "success": true })))
+    apply_featured_skin(&state, target.id, body.skin_id).await
 }

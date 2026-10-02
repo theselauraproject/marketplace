@@ -44,6 +44,10 @@ export interface Project {
 
   downloads: number;
 
+  likesCount?: number;
+
+  likedByMe?: boolean;
+
   status?: ProjectStatus;
 
   moderationNote?: string | null;
@@ -51,7 +55,6 @@ export interface Project {
   createdAt?: string;
   updatedAt?: string;
 
-  /** Whether the current viewer can edit or delete this project. */
   canManage?: boolean;
 
   gameVersions?: GameVersion[];

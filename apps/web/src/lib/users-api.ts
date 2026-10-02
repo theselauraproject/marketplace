@@ -57,9 +57,10 @@ export interface UpdateProfileInput {
 }
 
 export async function updateProfile(
+  username: string,
   input: UpdateProfileInput,
 ): Promise<ProfileUser> {
-  const response = await apiFetch("/api/v1/users/me", {
+  const response = await apiFetch(`/api/v1/users/${encodeURIComponent(username)}`, {
     method: "PATCH",
     body: JSON.stringify(input),
   });

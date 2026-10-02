@@ -8,11 +8,15 @@ mod models;
 mod routes;
 mod session;
 mod storage;
+mod validation;
 
 use std::sync::Arc;
 
 use axum::{
-    http::{HeaderValue, Method},
+    extract::Request,
+    http::{header::CACHE_CONTROL, HeaderValue, Method},
+    middleware::{self, Next},
+    response::Response,
     routing::{delete, get, patch, post},
     Router,
 };
@@ -29,6 +33,26 @@ use config::Config;
 pub struct AppState {
     pub pool: PgPool,
     pub config: Config,
+}
+
+async fn no_store(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+
+    response
+}
+
+async fn revalidate(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+
+    response
 }
 
 #[tokio::main]
@@ -89,21 +113,39 @@ async fn main() {
         .route("/auth/switch", post(routes::auth::switch_account))
         .route("/users/me", patch(routes::users::update_profile))
         .route("/users/me/featured-skin", patch(routes::users::set_featured_skin))
-        .route("/users/:username", get(routes::users::get_user_profile))
+        .route(
+            "/users/:username",
+            get(routes::users::get_user_profile).patch(routes::users::update_user_profile),
+        )
+        .route(
+            "/users/:username/featured-skin",
+            patch(routes::users::set_user_featured_skin),
+        )
+        .route(
+            "/orgs/:login",
+            get(routes::organizations::get_organization)
+                .patch(routes::organizations::update_organization),
+        )
         .route("/skins", get(routes::skins::list_skins).post(routes::skins::create_skin))
         .route("/skins/:slug", get(routes::skins::get_skin).delete(routes::skins::delete_skin))
         .route("/projects", get(routes::projects::list_projects).post(routes::projects::create_project))
+        .route("/recommendations", get(routes::projects::recommended_projects))
         .route("/projects/search", get(routes::projects::search_projects))
         .route("/projects/moderation/queue", get(routes::projects::moderation_queue))
         .route("/projects/:slug", get(routes::projects::get_project).patch(routes::projects::update_project).delete(routes::projects::delete_project))
+        .route("/projects/:slug/like", post(routes::projects::toggle_like))
         .route("/projects/:slug/status", patch(routes::projects::update_status))
         .route("/projects/:slug/versions", post(routes::projects::create_version))
         .route("/versions/:id/download", get(routes::projects::download_version))
         .route("/uploads/test", get(routes::uploads::uploads_test));
 
-    let app = Router::new()
-        .nest("/api/v1", api_v1)
+    let uploads = Router::new()
         .nest_service("/uploads", ServeDir::new("uploads"))
+        .layer(middleware::from_fn(revalidate));
+
+    let app = Router::new()
+        .nest("/api/v1", api_v1.layer(middleware::from_fn(no_store)))
+        .merge(uploads)
         .layer(CookieManagerLayer::new())
         .layer(cors)
         .layer(TraceLayer::new_for_http())

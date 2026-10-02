@@ -4,10 +4,12 @@ import { notFound } from "next/navigation";
 import { Download } from "lucide-react";
 
 import { Card } from "@/components/ui/Card";
-import Button from "@/components/ui/Button";
-import { SkinViewer3D } from "@/components/skins/SkinViewer3D";
+import { DownloadButton } from "@/components/ui/DownloadButton";
+import { SkinDetailViewer } from "@/components/skins/SkinDetailViewer";
 import { SkinActions } from "@/components/skins/SkinActions";
+import { profileHref } from "@/lib/profile-links";
 import { getSkinBySlug, SKIN_SLOTS } from "@/lib/skins-api";
+import { getCookieHeader } from "@/lib/server-cookies";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +17,17 @@ interface PageProps {
   params: Promise<{ slug: string }>;
 }
 
+async function loadSkin(slug: string) {
+  const cookieHeader = await getCookieHeader();
+
+  return getSkinBySlug(slug, cookieHeader);
+}
+
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const skin = await getSkinBySlug(slug);
+  const skin = await loadSkin(slug);
 
   if (!skin) {
     return { title: "Skin not found — Selaura Marketplace" };
@@ -33,7 +41,7 @@ export async function generateMetadata({
 
 export default async function SkinDetailPage({ params }: PageProps) {
   const { slug } = await params;
-  const skin = await getSkinBySlug(slug);
+  const skin = await loadSkin(slug);
 
   if (!skin) {
     notFound();
@@ -46,23 +54,24 @@ export default async function SkinDetailPage({ params }: PageProps) {
       <div className="grid gap-8 lg:grid-cols-[300px_minmax(0,1fr)]">
         <div>
           <Card className="flex flex-col items-center gap-3 p-4">
-            <SkinViewer3D
-              src={skin.imageUrl}
-              model={skin.variant === "slim" ? "slim" : "default"}
+            <SkinDetailViewer
+              imageUrl={skin.imageUrl}
+              variant={skin.variant}
+              kind={skin.kind}
+              pieceSlot={skin.pieceSlot}
               width={252}
               height={320}
             />
           </Card>
 
-          <Button
-            href={skin.imageUrl}
-            target="_blank"
+          <DownloadButton
+            url={skin.imageUrl}
             variant="muted"
             icon={<Download size={14} />}
             className="mt-3 w-full"
           >
             Download texture
-          </Button>
+          </DownloadButton>
         </div>
 
         <div className="min-w-0">
@@ -77,7 +86,7 @@ export default async function SkinDetailPage({ params }: PageProps) {
           </div>
 
           <Link
-            href={`/u/${skin.author.username}`}
+            href={profileHref(skin.author)}
             className="mt-1 inline-block text-sm text-[var(--foreground)]/50 transition hover:text-[var(--foreground)]"
           >
             by {skin.author.username}
@@ -135,7 +144,9 @@ export default async function SkinDetailPage({ params }: PageProps) {
             <SkinActions
               skinId={skin.id}
               slug={skin.slug}
-              authorId={skin.author.id}
+              canManage={skin.canManage ?? false}
+              canFeature={skin.canFeature ?? false}
+              uploaderUsername={skin.uploader?.username}
             />
           </div>
         </div>

@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { ProfileHeader } from "@/components/profile/ProfileHeader";
 import { ProjectGrid } from "@/components/projects/ProjectGrid";
 import { getUserProfile } from "@/lib/users-api";
+import { getCookieHeader } from "@/lib/server-cookies";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +13,7 @@ interface PageProps {
 }
 
 async function loadProfile(username: string) {
-  const cookieStore = await cookies();
-
-  const cookieHeader = cookieStore
-    .getAll()
-    .map((cookie) => `${cookie.name}=${cookie.value}`)
-    .join("; ");
+  const cookieHeader = await getCookieHeader();
 
   return getUserProfile(username, cookieHeader);
 }

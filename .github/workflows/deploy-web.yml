@@ -1,0 +1,123 @@
+name: Deploy web to Cloudflare Workers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      RAW_API_URL: ${{ vars.API_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check configuration
+        run: |
+          missing=0
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repository secret $name (Settings > Secrets and variables > Actions)."
+              missing=1
+            fi
+          done
+          [ "$missing" = 0 ] || exit 1
+
+          api="${RAW_API_URL%/}"
+          if [ -z "$api" ]; then
+            echo "::warning::Repository variable API_URL is not set. The Worker will deploy, but pages that load data (home, projects, skins) will error until it points at your hosted API."
+          elif ! [[ "$api" =~ ^https?://[^/:]+$ ]]; then
+            echo "::error::API_URL must look like https://api.example.com (no port, no path). Got: $api"
+            exit 1
+          fi
+          echo "API_URL=$api" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: apps/web
+        run: pnpm exec tsc --noEmit
+
+      - name: Build
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_API_URL: ""
+          API_PROXY_TARGET: ${{ env.API_URL }}
+        run: pnpm exec opennextjs-cloudflare build
+
+      - name: Deploy
+        id: deploy
+        working-directory: apps/web
+        run: |
+          set -o pipefail
+          args=()
+          if [ -n "$API_URL" ]; then
+            args+=(--var "API_INTERNAL_URL:$API_URL")
+          fi
+          pnpm exec wrangler deploy "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+
+          url=$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -n 1 || true)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          if [ -n "$url" ]; then
+            {
+              echo "### Deployed"
+              echo "[$url]($url)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Smoke test
+        if: steps.deploy.outputs.url != ''
+        env:
+          SITE_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          # /offline is static, so it works even when the API is down.
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$SITE_URL/offline" || true)
+            [ "$code" = "200" ] && break
+            echo "Attempt $i: got $code, retrying in 5s..."
+            sleep 5
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::$SITE_URL/offline returned $code"
+            exit 1
+          fi
+          echo "$SITE_URL/offline OK"
+
+          if [ -n "$API_URL" ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$SITE_URL/" || true)
+            if [ "$code" = "200" ]; then
+              echo "$SITE_URL/ OK (API reachable)"
+            else
+              echo "::warning::Home page returned $code. Check that API_URL ($API_URL) is up and reachable."
+            fi
+          fi

@@ -76,8 +76,6 @@ pub struct PublicUser {
     pub discord_url: Option<String>,
     #[serde(rename = "websiteUrl")]
     pub website_url: Option<String>,
-    /// Derived from the GitHub username this account authenticated with —
-    /// not a separately stored field.
     #[serde(rename = "githubUrl")]
     pub github_url: String,
     #[serde(rename = "createdAt")]

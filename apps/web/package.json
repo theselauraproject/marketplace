@@ -6,12 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "cf:deploy": "opennextjs-cloudflare build && wrangler deploy"
   },
   "dependencies": {
     "@selaura/types": "workspace:*",
     "lucide-react": "^1.31.0",
-    "next": "16.3.0",
+    "next": "16.3.8",
     "prismjs": "^1.30.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -26,6 +29,7 @@
     "three": "^0.156.0"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.7",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/prismjs": "^1.26.6",
@@ -35,9 +39,10 @@
     "@types/three": "^0.156.0",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.3.0",
+    "eslint-config-next": "16.3.8",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.145.0"
   },
   "packageManager": "pnpm@10.32.1"
 }

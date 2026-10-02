@@ -87,13 +87,11 @@ function Toast({
 }) {
   const [phase, setPhase] = useState<"enter" | "visible" | "exit">("enter");
 
-  // Ease in on mount.
   useEffect(() => {
     const frame = requestAnimationFrame(() => setPhase("visible"));
     return () => cancelAnimationFrame(frame);
   }, []);
 
-  // Ease back out after a couple of seconds.
   useEffect(() => {
     if (phase !== "visible") {
       return;
@@ -103,7 +101,6 @@ function Toast({
     return () => clearTimeout(timer);
   }, [phase]);
 
-  // Remove from the DOM once the exit transition finishes.
   useEffect(() => {
     if (phase !== "exit") {
       return;

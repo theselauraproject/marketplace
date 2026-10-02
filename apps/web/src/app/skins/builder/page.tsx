@@ -7,6 +7,7 @@ import { Save, Wand2, X } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { SkinViewer3D } from "@/components/skins/SkinViewer3D";
+import { SkinSearchInput } from "@/components/skins/SkinSearchInput";
 import { SkinThumbnail } from "@/components/skins/SkinThumbnail";
 import {
   getSkins,
@@ -16,22 +17,8 @@ import {
   type SkinSlot,
 } from "@/lib/skins-api";
 import { compositeSkinLayers, canvasToPngBlob } from "@/lib/skin-compositor";
+import { inputClass } from "@/components/ui/fields";
 
-const inputClass = [
-  "w-full",
-  "rounded-xl",
-  "border border-[var(--border)]",
-  "bg-[var(--background)]",
-  "px-3.5 py-2.5",
-  "text-sm",
-  "text-[var(--foreground)]",
-  "outline-none",
-  "transition",
-  "placeholder:text-[var(--faint)]",
-  "focus:border-[var(--foreground)]/30",
-].join(" ");
-
-// Draw order for stacking pieces onto the base — later entries paint on top.
 const SLOT_ORDER: SkinSlot[] = [
   "legs",
   "shoes",
@@ -50,6 +37,8 @@ export default function SkinBuilderPage() {
   const router = useRouter();
 
   const [library, setLibrary] = useState<Skin[] | null>(null);
+  const [known, setKnown] = useState<Record<string, Skin>>({});
+  const [search, setSearch] = useState("");
   const [baseId, setBaseId] = useState<string | null>(null);
   const [pieceBySlot, setPieceBySlot] = useState<
     Partial<Record<SkinSlot, string>>
@@ -67,10 +56,34 @@ export default function SkinBuilderPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getSkins()
-      .then(setLibrary)
-      .catch(() => setLibrary([]));
-  }, []);
+    let cancelled = false;
+
+    const term = search.trim();
+
+    const timer = setTimeout(
+      () => {
+        getSkins({ q: term || undefined })
+          .then((result) => {
+            if (cancelled) return;
+
+            setLibrary(result);
+            setKnown((current) => ({
+              ...current,
+              ...Object.fromEntries(result.map((skin) => [skin.id, skin])),
+            }));
+          })
+          .catch(() => {
+            if (!cancelled) setLibrary([]);
+          });
+      },
+      term ? 200 : 0,
+    );
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [search]);
 
   const bases = useMemo(
     () => library?.filter((s) => s.kind === "full") ?? [],
@@ -90,22 +103,21 @@ export default function SkinBuilderPage() {
     return map;
   }, [library]);
 
-  const base = bases.find((s) => s.id === baseId) ?? null;
+  const base = baseId ? (known[baseId] ?? null) : null;
 
   const selectedPieces = SLOT_ORDER.map((slot) => {
     const id = pieceBySlot[slot];
-    return id ? library?.find((s) => s.id === id) ?? null : null;
+    return id ? (known[id] ?? null) : null;
   }).filter((s): s is Skin => s !== null);
 
-  const layerUrls = useMemo(() => {
-    const urls: string[] = [];
-    if (base) urls.push(base.imageUrl);
-    for (const piece of selectedPieces) urls.push(piece.imageUrl);
-    return urls;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, JSON.stringify(pieceBySlot)]);
+  const layerKey = JSON.stringify([
+    ...(base ? [base.imageUrl] : []),
+    ...selectedPieces.map((piece) => piece.imageUrl),
+  ]);
 
   useEffect(() => {
+    const layerUrls: string[] = JSON.parse(layerKey);
+
     if (layerUrls.length === 0) {
       setPreviewUrl(null);
       setPreviewCanvas(null);
@@ -127,7 +139,7 @@ export default function SkinBuilderPage() {
     return () => {
       cancelled = true;
     };
-  }, [layerUrls]);
+  }, [layerKey]);
 
   function togglePiece(slot: SkinSlot, skinId: string) {
     setPieceBySlot((current) => {
@@ -180,7 +192,28 @@ export default function SkinBuilderPage() {
     }
   }
 
-  const activePieces = piecesBySlot.get(activeTab) ?? [];
+  const searching = search.trim().length > 0;
+
+  const visibleTab: SkinSlot =
+    searching && (piecesBySlot.get(activeTab)?.length ?? 0) === 0
+      ? (SLOT_ORDER.find((slot) => (piecesBySlot.get(slot)?.length ?? 0) > 0) ??
+        activeTab)
+      : activeTab;
+
+  const activePieces = piecesBySlot.get(visibleTab) ?? [];
+
+  const headCompanionSlot: SkinSlot | null =
+    visibleTab === "hair"
+      ? "headwear"
+      : visibleTab === "headwear"
+        ? "hair"
+        : null;
+
+  const headCompanionUrl = headCompanionSlot
+    ? (known[pieceBySlot[headCompanionSlot] ?? ""]?.imageUrl ?? null)
+    : null;
+
+  const companionGoesBefore = visibleTab === "hair";
 
   return (
     <main className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-6 sm:py-10">
@@ -189,10 +222,16 @@ export default function SkinBuilderPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Skin builder</h1>
       </div>
 
-      <p className="mb-8 max-w-2xl text-sm text-[var(--foreground)]/55">
+      <p className="mb-6 max-w-2xl text-sm text-[var(--foreground)]/55">
         Start from a base skin (optional), then layer on pieces from the
         community library. Everything you use gets credited automatically.
       </p>
+
+      <SkinSearchInput
+        value={search}
+        onChange={setSearch}
+        className="mb-8 max-w-sm"
+      />
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div>
@@ -212,6 +251,18 @@ export default function SkinBuilderPage() {
               >
                 Blank
               </button>
+
+              {library === null && (
+                <span className="self-center text-xs text-[var(--foreground)]/40">
+                  Loading…
+                </span>
+              )}
+
+              {library !== null && searching && bases.length === 0 && (
+                <span className="self-center text-xs text-[var(--foreground)]/40">
+                  No base skins match.
+                </span>
+              )}
 
               {bases.map((skin) => (
                 <ThumbButton
@@ -239,7 +290,7 @@ export default function SkinBuilderPage() {
                     onClick={() => setActiveTab(slot)}
                     className={[
                       "rounded-lg px-2.5 py-1.5 text-xs font-medium transition",
-                      activeTab === slot
+                      visibleTab === slot
                         ? "bg-[var(--surface-hover)] text-[var(--foreground)]"
                         : "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]",
                       pieceBySlot[slot] ? "ring-1 ring-[var(--foreground)]/20" : "",
@@ -253,7 +304,9 @@ export default function SkinBuilderPage() {
 
             {activePieces.length === 0 ? (
               <Card className="p-6 text-center text-sm text-[var(--foreground)]/45">
-                No pieces uploaded for this slot yet.
+                {searching
+                  ? "No pieces match that search."
+                  : "No pieces uploaded for this slot yet."}
               </Card>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -261,8 +314,10 @@ export default function SkinBuilderPage() {
                   <ThumbButton
                     key={skin.id}
                     skin={skin}
-                    active={pieceBySlot[activeTab] === skin.id}
-                    onClick={() => togglePiece(activeTab, skin.id)}
+                    active={pieceBySlot[visibleTab] === skin.id}
+                    onClick={() => togglePiece(visibleTab, skin.id)}
+                    companionImageUrl={headCompanionUrl ?? undefined}
+                    companionGoesBefore={companionGoesBefore}
                   />
                 ))}
               </div>
@@ -271,7 +326,7 @@ export default function SkinBuilderPage() {
         </div>
 
         <div className="space-y-4">
-          <Card className="sticky top-24 z-10 flex flex-col items-center gap-3 p-4">
+          <Card className="flex flex-col items-center gap-3 p-4 lg:sticky lg:top-24 lg:z-10">
             {previewUrl ? (
               <SkinViewer3D src={previewUrl} width={252} height={320} />
             ) : (
@@ -321,10 +376,14 @@ function ThumbButton({
   skin,
   active,
   onClick,
+  companionImageUrl,
+  companionGoesBefore,
 }: {
   skin: Skin;
   active: boolean;
   onClick: () => void;
+  companionImageUrl?: string;
+  companionGoesBefore?: boolean;
 }) {
   return (
     <button
@@ -344,6 +403,12 @@ function ThumbButton({
         variant={skin.variant}
         kind={skin.kind}
         pieceSlot={skin.pieceSlot}
+        layersBefore={
+          companionImageUrl && companionGoesBefore ? [companionImageUrl] : undefined
+        }
+        layersAfter={
+          companionImageUrl && !companionGoesBefore ? [companionImageUrl] : undefined
+        }
         width={56}
         height={72}
       />

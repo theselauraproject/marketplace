@@ -106,25 +106,39 @@ pub async fn get_github_email(access_token: &str) -> Option<String> {
         .map(|e| e.email)
 }
 
-pub async fn get_github_orgs(access_token: &str) -> Vec<GitHubOrg> {
+pub async fn get_github_orgs(access_token: &str) -> Option<Vec<GitHubOrg>> {
+    const PER_PAGE: usize = 100;
+    const MAX_PAGES: usize = 5;
+
     let client = reqwest::Client::new();
+    let mut orgs: Vec<GitHubOrg> = Vec::new();
 
-    let response = match client
-        .get("https://api.github.com/user/orgs")
-        .header("Authorization", format!("Bearer {access_token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "selaura-api")
-        .send()
-        .await
-    {
-        Ok(response) => response,
-        Err(_) => return Vec::new(),
-    };
+    for page in 1..=MAX_PAGES {
+        let response = client
+            .get(format!(
+                "https://api.github.com/user/orgs?per_page={PER_PAGE}&page={page}"
+            ))
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", "selaura-api")
+            .send()
+            .await
+            .ok()?;
 
-    if !response.status().is_success() {
-        return Vec::new();
+        if !response.status().is_success() {
+            return None;
+        }
+
+        let batch: Vec<GitHubOrg> = response.json().await.ok()?;
+        let count = batch.len();
+
+        orgs.extend(batch);
+
+        if count < PER_PAGE {
+            break;
+        }
     }
 
-    response.json().await.unwrap_or_default()
+    Some(orgs)
 }

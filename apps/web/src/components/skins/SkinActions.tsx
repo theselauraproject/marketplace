@@ -5,33 +5,28 @@ import { useState } from "react";
 import { Check, Star, Trash2 } from "lucide-react";
 
 import Button from "@/components/ui/Button";
-import { useCurrentUser } from "@/lib/use-current-user";
 import { deleteSkin, setFeaturedSkin } from "@/lib/skins-api";
 
 export function SkinActions({
   skinId,
   slug,
-  authorId,
+  canManage,
+  canFeature,
+  uploaderUsername,
 }: {
   skinId: string;
   slug: string;
-  authorId: string;
+  canManage: boolean;
+  canFeature: boolean;
+  uploaderUsername?: string;
 }) {
   const router = useRouter();
-  const { user } = useCurrentUser();
 
   const [busy, setBusy] = useState(false);
   const [featured, setFeatured] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!user) {
-    return null;
-  }
-
-  const isOwner = user.id === authorId;
-  const isStaff = user.role === "admin" || user.role === "moderator";
-
-  if (!isOwner && !isStaff) {
+  if (!canManage && !canFeature) {
     return null;
   }
 
@@ -61,7 +56,7 @@ export function SkinActions({
     setError(null);
 
     try {
-      await setFeaturedSkin(skinId);
+      await setFeaturedSkin(skinId, uploaderUsername);
       setFeatured(true);
     } catch (err) {
       setError(
@@ -75,7 +70,7 @@ export function SkinActions({
   return (
     <div>
       <div className="flex gap-2">
-        {isOwner && (
+        {canFeature && uploaderUsername && (
           <Button
             type="button"
             variant="muted"
@@ -87,15 +82,17 @@ export function SkinActions({
           </Button>
         )}
 
-        <Button
-          type="button"
-          variant="muted"
-          icon={<Trash2 size={14} />}
-          disabled={busy}
-          onClick={handleDelete}
-        >
-          Delete
-        </Button>
+        {canManage && (
+          <Button
+            type="button"
+            variant="muted"
+            icon={<Trash2 size={14} />}
+            disabled={busy}
+            onClick={handleDelete}
+          >
+            Delete
+          </Button>
+        )}
       </div>
 
       {error && <p className="mt-2 text-xs text-[var(--danger)]">{error}</p>}

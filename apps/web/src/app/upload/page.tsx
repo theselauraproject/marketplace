@@ -16,8 +16,10 @@ import type { ProjectType } from "@selaura/types";
 
 import { ProjectMarkdownEditor } from "@/components/projects/ProjectMarkdownEditor";
 import Button from "@/components/ui/Button";
+import { PublishingAs } from "@/components/ui/PublishingAs";
 import { apiFetch } from "@/lib/api-client";
 import { getMetadata, type Metadata } from "@/lib/metadata-api";
+import { inputClass } from "@/components/ui/fields";
 
 export default function UploadPage() {
   const [metadata, setMetadata] = useState<Metadata | null>(null);
@@ -227,10 +229,11 @@ export default function UploadPage() {
         <p className="mt-1 text-sm text-[var(--muted)]">
           Share your project with the Selaura community.
         </p>
+
+        <PublishingAs className="mt-4" />
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {}
 
         <Section
           title="Basic information"
@@ -352,8 +355,6 @@ export default function UploadPage() {
           </div>
         </Section>
 
-        {}
-
         <Section
           title="Compatibility"
           description="Tell users what versions and environments your project supports."
@@ -404,8 +405,6 @@ export default function UploadPage() {
           )}
         </Section>
 
-        {}
-
         <Section
           title="README"
           description="Give your project a proper description with GitHub-style Markdown."
@@ -425,8 +424,6 @@ export default function UploadPage() {
             ].join("\n")}
           />
         </Section>
-
-        {}
 
         <Section
           title="Files"
@@ -460,8 +457,6 @@ export default function UploadPage() {
           </div>
         </Section>
 
-        {}
-
         {error && (
           <div
             className={[
@@ -491,8 +486,6 @@ export default function UploadPage() {
             Project submitted successfully. It will appear after approval.
           </div>
         )}
-
-        {}
 
         <div className="flex justify-end">
           <Button
@@ -855,18 +848,3 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-const inputClass = [
-  "w-full",
-  "rounded-xl",
-  "border border-[var(--border)]",
-  "bg-[var(--background)]",
-  "px-3.5 py-2.5",
-  "text-sm",
-  "text-[var(--foreground)]",
-  "outline-none",
-  "transition",
-  "placeholder:text-[var(--faint)]",
-  "focus:border-[var(--foreground)]/30",
-  "focus:ring-2",
-  "focus:ring-[var(--foreground)]/5",
-].join(" ");

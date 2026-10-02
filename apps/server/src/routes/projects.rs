@@ -70,6 +70,7 @@ struct ProjectListRow {
     header_url: Option<String>,
     tags: Option<Vec<String>>,
     downloads: i32,
+    likes_count: i32,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     author_id: Uuid,
@@ -93,6 +94,7 @@ impl FromRow<'_, PgRow> for ProjectListRow {
             header_url: row.try_get("header_url")?,
             tags: row.try_get("tags")?,
             downloads: row.try_get("downloads")?,
+            likes_count: row.try_get("likes_count")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
             author_id: row.try_get("author_id")?,
@@ -177,6 +179,7 @@ pub async fn search_projects(
             p.header_url,
             p.tags,
             p.downloads,
+            p.likes_count,
             p.created_at,
             p.updated_at,
             u.id as author_id,
@@ -218,6 +221,7 @@ pub async fn search_projects(
                 "headerUrl": row.header_url,
                 "tags": row.tags,
                 "downloads": row.downloads,
+                "likesCount": row.likes_count,
                 "author": author_json(
                     row.author_id,
                     &row.author_username,
@@ -248,6 +252,7 @@ pub async fn list_projects(
             p.header_url,
             p.tags,
             p.downloads,
+            p.likes_count,
             p.created_at,
             p.updated_at,
             u.id as author_id,
@@ -325,6 +330,7 @@ pub async fn list_projects(
                 "headerUrl": row.header_url,
                 "tags": row.tags,
                 "downloads": row.downloads,
+                "likesCount": row.likes_count,
                 "createdAt": row.created_at.to_rfc3339(),
                 "updatedAt": row.updated_at.to_rfc3339(),
 
@@ -366,6 +372,7 @@ struct ProjectDetailRow {
     tags: Option<Vec<String>>,
     moderation_note: Option<String>,
     downloads: i32,
+    likes_count: i32,
     status: String,
     author_id: Uuid,
     created_at: DateTime<Utc>,
@@ -391,6 +398,7 @@ impl FromRow<'_, PgRow> for ProjectDetailRow {
             tags: row.try_get("tags")?,
             moderation_note: row.try_get("moderation_note")?,
             downloads: row.try_get("downloads")?,
+            likes_count: row.try_get("likes_count")?,
             status: row.try_get("status")?,
             author_id: row.try_get("author_id")?,
             created_at: row.try_get("created_at")?,
@@ -414,32 +422,12 @@ async fn can_manage_project(
         return Ok(true);
     }
 
-    let is_linked = sqlx::query(
-        "SELECT 1 FROM linked_accounts \
-         WHERE (user_a_id = $1 AND user_b_id = $2) \
-            OR (user_a_id = $2 AND user_b_id = $1)",
-    )
-    .bind(user.id)
-    .bind(author_id)
-    .fetch_optional(pool)
-    .await?
-    .is_some();
-
-    if is_linked {
+    if crate::current_user::is_same_person(pool, user.id, author_id).await? {
         return Ok(true);
     }
 
     if let Some(org_id) = owner_org_id {
-        let is_member = sqlx::query(
-            "SELECT 1 FROM organization_members WHERE org_id = $1 AND user_id = $2",
-        )
-        .bind(org_id)
-        .bind(user.id)
-        .fetch_optional(pool)
-        .await?
-        .is_some();
-
-        if is_member {
+        if crate::current_user::is_org_member(pool, org_id, user.id).await? {
             return Ok(true);
         }
     }
@@ -465,6 +453,7 @@ pub async fn get_project(
             p.tags,
             p.moderation_note,
             p.downloads,
+            p.likes_count,
             p.status::text as status,
             p.author_id,
             p.created_at,
@@ -499,6 +488,19 @@ pub async fn get_project(
     if project.status != "approved" && !can_manage {
         return Err(ApiError::not_found("Project not found"));
     }
+
+    let liked_by_me = match &current_user {
+        Some(u) => {
+            sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM project_likes WHERE project_id = $1 AND user_id = $2)",
+            )
+            .bind(project.id)
+            .bind(u.id)
+            .fetch_one(&state.pool)
+            .await?
+        }
+        None => false,
+    };
 
     let versions: Vec<VersionRow> = sqlx::query_as(
         "SELECT
@@ -560,6 +562,8 @@ pub async fn get_project(
             "tags": project.tags,
             "moderationNote": project.moderation_note,
             "downloads": project.downloads,
+            "likesCount": project.likes_count,
+            "likedByMe": liked_by_me,
             "status": project.status,
             "createdAt": project.created_at.to_rfc3339(),
             "updatedAt": project.updated_at.to_rfc3339(),
@@ -579,24 +583,11 @@ pub async fn get_project(
     })))
 }
 
-#[derive(Deserialize)]
-pub struct UpdateProjectBody {
-    name: Option<String>,
-    description: Option<String>,
-    readme: Option<String>,
-    tags: Option<Vec<String>>,
-}
-
-/// The owner-facing edit form. Any change here sends the listing back
-/// through moderation (status -> pending) before it's visible in the
-/// public library again — this is deliberately unconditional, including
-/// for staff, since staff review edits through the separate moderation
-/// queue (`update_status`) rather than this endpoint.
 pub async fn update_project(
     State(state): State<Arc<AppState>>,
     cookies: Cookies,
     Path(slug): Path<String>,
-    Json(body): Json<UpdateProjectBody>,
+    multipart: Multipart,
 ) -> ApiResult<Json<Value>> {
     let user = require_user(&state.pool, &cookies).await?;
 
@@ -617,19 +608,45 @@ pub async fn update_project(
         ));
     }
 
-    let name = parse_project_name(body.name.as_ref());
-    let description = parse_description(body.description.as_ref());
+    let upload = consume_multipart(&state, multipart, true).await?;
+    let fields = upload.fields;
 
-    let readme = body.readme.as_ref().map(|raw| {
+    let name = parse_project_name(fields.get("name"));
+    let description = parse_description(fields.get("description"));
+
+    let project_type = fields
+        .get("type")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    if let Some(project_type) = &project_type {
+        if !is_valid_project_type(project_type) {
+            return Err(ApiError::bad_request(format!(
+                "Invalid project type: {project_type}"
+            )));
+        }
+    }
+
+    let readme = fields.get("readme").map(|raw| {
         raw.trim()
             .chars()
             .take(MAX_README_LENGTH)
             .collect::<String>()
     });
 
-    let tags = body.tags.map(clean_tags);
+    let tags = fields.get("tags").map(|raw| parse_tags(Some(raw)));
 
-    if name.is_none() && description.is_none() && readme.is_none() && tags.is_none() {
+    let icon_url = upload.icon_url;
+    let header_url = upload.header_url;
+
+    if name.is_none()
+        && description.is_none()
+        && readme.is_none()
+        && tags.is_none()
+        && project_type.is_none()
+        && icon_url.is_none()
+        && header_url.is_none()
+    {
         return Err(ApiError::bad_request("Nothing to update"));
     }
 
@@ -640,10 +657,13 @@ pub async fn update_project(
             description = COALESCE($2, description),
             readme = COALESCE($3, readme),
             tags = COALESCE($4, tags),
+            type = COALESCE($5::project_type, type),
+            icon_url = COALESCE($6, icon_url),
+            header_url = COALESCE($7, header_url),
             status = 'pending',
             moderation_note = NULL,
             updated_at = now()
-         WHERE id = $5
+         WHERE id = $8
          RETURNING
             id,
             slug,
@@ -656,6 +676,7 @@ pub async fn update_project(
             tags,
             moderation_note,
             downloads,
+            likes_count,
             status::text as status,
             author_id,
             created_at,
@@ -670,6 +691,9 @@ pub async fn update_project(
     .bind(&description)
     .bind(&readme)
     .bind(&tags)
+    .bind(&project_type)
+    .bind(&icon_url)
+    .bind(&header_url)
     .bind(project_id)
     .fetch_one(&state.pool)
     .await?;
@@ -1112,6 +1136,7 @@ pub async fn create_project(
             tags,
             moderation_note,
             downloads,
+            likes_count,
             status::text as status,
             author_id,
             created_at,
@@ -1586,10 +1611,11 @@ pub async fn moderation_queue(
             p.status::text as status,
             p.moderation_note,
             p.created_at,
-            u.username as author_username,
-            u.avatar_url as author_avatar_url
+            COALESCE(o.login, u.username) as author_username,
+            COALESCE(o.avatar_url, u.avatar_url) as author_avatar_url
          FROM projects p
-         JOIN users u ON p.author_id = u.id ";
+         JOIN users u ON p.author_id = u.id
+         LEFT JOIN organizations o ON p.owner_org_id = o.id ";
 
     let rows: Vec<ModerationRow> =
         if status_filter == "all" {
@@ -1701,6 +1727,7 @@ pub async fn update_status(
                 tags,
                 moderation_note,
                 downloads,
+                likes_count,
                 status::text as status,
                 author_id,
                 created_at,
@@ -1866,4 +1893,203 @@ pub async fn delete_project(
     Ok(Json(json!({
         "success": true
     })))
+}
+
+pub async fn toggle_like(
+    State(state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(slug): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let user = require_user(&state.pool, &cookies).await?;
+
+    let project_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM projects WHERE slug = $1 AND status = 'approved'")
+            .bind(&slug)
+            .fetch_optional(&state.pool)
+            .await?;
+
+    let Some(project_id) = project_id else {
+        return Err(ApiError::not_found("Project not found"));
+    };
+
+    let mut tx = state.pool.begin().await?;
+
+    let deleted = sqlx::query(
+        "DELETE FROM project_likes WHERE project_id = $1 AND user_id = $2",
+    )
+    .bind(project_id)
+    .bind(user.id)
+    .execute(&mut *tx)
+    .await?;
+
+    let liked = if deleted.rows_affected() > 0 {
+        sqlx::query("UPDATE projects SET likes_count = likes_count - 1 WHERE id = $1")
+            .bind(project_id)
+            .execute(&mut *tx)
+            .await?;
+
+        false
+    } else {
+        sqlx::query(
+            "INSERT INTO project_likes (project_id, user_id) VALUES ($1, $2)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(project_id)
+        .bind(user.id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query("UPDATE projects SET likes_count = likes_count + 1 WHERE id = $1")
+            .bind(project_id)
+            .execute(&mut *tx)
+            .await?;
+
+        true
+    };
+
+    let likes_count: i32 =
+        sqlx::query_scalar("SELECT likes_count FROM projects WHERE id = $1")
+            .bind(project_id)
+            .fetch_one(&mut *tx)
+            .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(json!({
+        "liked": liked,
+        "likesCount": likes_count,
+    })))
+}
+
+pub async fn recommended_projects(
+    State(state): State<Arc<AppState>>,
+    cookies: Cookies,
+) -> ApiResult<Json<Value>> {
+    const RECOMMENDATION_LIMIT: i64 = 12;
+
+    let current_user = get_current_user(&state.pool, &cookies).await?;
+
+    let rows: Vec<ProjectListRow> = if let Some(user) = &current_user {
+        sqlx::query_as(
+            "WITH liked AS (
+                SELECT p.id, p.type, COALESCE(p.tags, ARRAY[]::text[]) AS tags
+                FROM project_likes pl
+                JOIN projects p ON p.id = pl.project_id
+                WHERE pl.user_id = $1
+             ),
+             scored AS (
+                SELECT
+                    p.id,
+                    GREATEST(
+                        (
+                            SELECT count(*)
+                            FROM liked l
+                            WHERE l.tags && COALESCE(p.tags, ARRAY[]::text[])
+                        ),
+                        0
+                    ) * 2
+                    + (SELECT count(*) FROM liked l WHERE l.type = p.type) AS score
+                FROM projects p
+                WHERE p.status = 'approved'
+                  AND p.author_id != $1
+                  AND p.id NOT IN (SELECT id FROM liked)
+             )
+             SELECT
+                p.id,
+                p.slug,
+                p.name,
+                p.description,
+                p.readme,
+                p.type::text as type,
+                p.icon_url,
+                p.header_url,
+                p.tags,
+                p.downloads,
+                p.likes_count,
+                p.created_at,
+                p.updated_at,
+                u.id as author_id,
+                u.username as author_username,
+                u.avatar_url as author_avatar_url,
+                o.id as owner_org_id,
+                o.login as owner_org_login,
+                o.avatar_url as owner_org_avatar_url
+             FROM projects p
+             JOIN scored s ON s.id = p.id
+             JOIN users u ON p.author_id = u.id
+             LEFT JOIN organizations o ON p.owner_org_id = o.id
+             ORDER BY s.score DESC, p.likes_count DESC, p.downloads DESC
+             LIMIT $2",
+        )
+        .bind(user.id)
+        .bind(RECOMMENDATION_LIMIT)
+        .fetch_all(&state.pool)
+        .await?
+    } else {
+        vec![]
+    };
+
+    let rows = if rows.is_empty() {
+        sqlx::query_as(
+            "SELECT
+                p.id,
+                p.slug,
+                p.name,
+                p.description,
+                p.readme,
+                p.type::text as type,
+                p.icon_url,
+                p.header_url,
+                p.tags,
+                p.downloads,
+                p.likes_count,
+                p.created_at,
+                p.updated_at,
+                u.id as author_id,
+                u.username as author_username,
+                u.avatar_url as author_avatar_url,
+                o.id as owner_org_id,
+                o.login as owner_org_login,
+                o.avatar_url as owner_org_avatar_url
+             FROM projects p
+             JOIN users u ON p.author_id = u.id
+             LEFT JOIN organizations o ON p.owner_org_id = o.id
+             WHERE p.status = 'approved'
+             ORDER BY p.likes_count DESC, p.downloads DESC, p.created_at DESC
+             LIMIT $1",
+        )
+        .bind(RECOMMENDATION_LIMIT)
+        .fetch_all(&state.pool)
+        .await?
+    } else {
+        rows
+    };
+
+    let result: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            json!({
+                "id": row.id,
+                "slug": row.slug,
+                "name": row.name,
+                "description": row.description,
+                "type": row.project_type,
+                "iconUrl": row.icon_url,
+                "headerUrl": row.header_url,
+                "tags": row.tags,
+                "downloads": row.downloads,
+                "likesCount": row.likes_count,
+                "author": author_json(
+                    row.author_id,
+                    &row.author_username,
+                    &row.author_avatar_url,
+                    &row.owner_org_login,
+                    &row.owner_org_avatar_url,
+                    &row.owner_org_id,
+                ),
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "projects": result })))
 }

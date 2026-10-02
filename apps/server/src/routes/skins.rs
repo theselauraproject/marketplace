@@ -12,7 +12,10 @@ use tower_cookies::Cookies;
 use uuid::Uuid;
 
 use crate::{
-    current_user::require_user,
+    current_user::{
+        get_active_identity, get_current_user, is_org_member, is_same_person, require_user,
+        ActiveIdentity,
+    },
     error::{ApiError, ApiResult},
     storage::save_uploaded_file,
     AppState,
@@ -40,10 +43,6 @@ const MAX_IMAGE_BYTES: usize = 2 * 1024 * 1024;
 
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
-/// Minecraft skin textures are always 64x64 (current format) or the legacy
-/// 64x32. Reads width/height straight out of the PNG's IHDR chunk, which is
-/// always the first chunk right after the signature — no image-decoding
-/// crate needed for just this.
 fn read_png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     if bytes.len() < 24 || !bytes.starts_with(&PNG_SIGNATURE) {
         return None;
@@ -76,6 +75,9 @@ struct SkinRow {
     author_id: Uuid,
     author_username: String,
     author_avatar_url: Option<String>,
+    owner_org_id: Option<Uuid>,
+    owner_org_login: Option<String>,
+    owner_org_avatar_url: Option<String>,
     remixed_from: Option<Vec<Uuid>>,
     downloads: i32,
     created_at: DateTime<Utc>,
@@ -96,6 +98,9 @@ impl FromRow<'_, PgRow> for SkinRow {
             author_id: row.try_get("author_id")?,
             author_username: row.try_get("author_username")?,
             author_avatar_url: row.try_get("author_avatar_url")?,
+            owner_org_id: row.try_get("owner_org_id")?,
+            owner_org_login: row.try_get("owner_org_login")?,
+            owner_org_avatar_url: row.try_get("owner_org_avatar_url")?,
             remixed_from: row.try_get("remixed_from")?,
             downloads: row.try_get("downloads")?,
             created_at: row.try_get("created_at")?,
@@ -107,9 +112,12 @@ const SKIN_SELECT: &str = "SELECT
         s.id, s.slug, s.name, s.description, s.kind::text as kind,
         s.piece_slot::text as piece_slot, s.variant::text as variant,
         s.image_url, s.tags, s.author_id, u.username as author_username,
-        u.avatar_url as author_avatar_url, s.remixed_from, s.downloads, s.created_at
+        u.avatar_url as author_avatar_url, s.owner_org_id,
+        o.login as owner_org_login, o.avatar_url as owner_org_avatar_url,
+        s.remixed_from, s.downloads, s.created_at
      FROM skins s
-     JOIN users u ON u.id = s.author_id ";
+     JOIN users u ON u.id = s.author_id
+     LEFT JOIN organizations o ON o.id = s.owner_org_id ";
 
 fn skin_json(row: &SkinRow) -> Value {
     json!({
@@ -124,12 +132,55 @@ fn skin_json(row: &SkinRow) -> Value {
         "tags": row.tags,
         "downloads": row.downloads,
         "createdAt": row.created_at.to_rfc3339(),
-        "author": {
+        "author": skin_author_json(row),
+        "uploader": {
+            "id": row.author_id,
+            "username": row.author_username,
+        },
+    })
+}
+
+fn skin_author_json(row: &SkinRow) -> Value {
+    if let Some(org_id) = row.owner_org_id {
+        json!({
+            "id": org_id,
+            "username": row.owner_org_login,
+            "avatarUrl": row.owner_org_avatar_url,
+            "kind": "org",
+        })
+    } else {
+        json!({
             "id": row.author_id,
             "username": row.author_username,
             "avatarUrl": row.author_avatar_url,
-        },
-    })
+            "kind": "user",
+        })
+    }
+}
+
+async fn skin_permissions(
+    pool: &sqlx::PgPool,
+    user: Option<&crate::models::User>,
+    author_id: Uuid,
+    owner_org_id: Option<Uuid>,
+    is_full_skin: bool,
+) -> sqlx::Result<(bool, bool)> {
+    let Some(user) = user else {
+        return Ok((false, false));
+    };
+
+    let in_owner_org = match owner_org_id {
+        Some(org_id) => is_org_member(pool, org_id, user.id).await?,
+        None => false,
+    };
+
+    let is_uploader = is_same_person(pool, user.id, author_id).await?;
+
+    let can_feature = is_full_skin && is_uploader;
+
+    let can_manage = is_uploader || in_owner_org || user.is_staff();
+
+    Ok((can_manage, can_feature))
 }
 
 #[derive(serde::Deserialize)]
@@ -174,9 +225,20 @@ pub async fn list_skins(
     }
 
     if let Some(term) = search {
-        binds.push(format!("%{term}%"));
+        let escaped = term
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+
+        binds.push(format!("%{escaped}%"));
+
         clauses.push(format!(
-            "(s.name ILIKE ${0} OR EXISTS (SELECT 1 FROM unnest(s.tags) AS tag WHERE tag ILIKE ${0}))",
+            "(s.name ILIKE ${0} \
+              OR s.description ILIKE ${0} \
+              OR s.piece_slot::text ILIKE ${0} \
+              OR u.username ILIKE ${0} \
+              OR o.login ILIKE ${0} \
+              OR EXISTS (SELECT 1 FROM unnest(s.tags) AS tag WHERE tag ILIKE ${0}))",
             binds.len()
         ));
     }
@@ -203,6 +265,7 @@ pub async fn list_skins(
 
 pub async fn get_skin(
     State(state): State<Arc<AppState>>,
+    cookies: Cookies,
     Path(slug): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let sql = format!("{SKIN_SELECT} WHERE s.slug = $1");
@@ -237,15 +300,32 @@ pub async fn get_skin(
                         "kind": r.kind,
                         "pieceSlot": r.piece_slot,
                         "imageUrl": r.image_url,
-                        "author": { "username": r.author_username },
+                        "author": {
+                            "username": r.owner_org_login.clone().unwrap_or_else(|| r.author_username.clone()),
+                            "kind": if r.owner_org_id.is_some() { "org" } else { "user" },
+                        },
                     })
                 })
                 .collect();
         }
     }
 
+    let viewer = get_current_user(&state.pool, &cookies).await?;
+
+    let (can_manage, can_feature) =
+        skin_permissions(
+            &state.pool,
+            viewer.as_ref(),
+            row.author_id,
+            row.owner_org_id,
+            row.kind == "full",
+        )
+        .await?;
+
     let mut skin = skin_json(&row);
     skin["remixedFrom"] = json!(credits);
+    skin["canManage"] = json!(can_manage);
+    skin["canFeature"] = json!(can_feature);
 
     Ok(Json(json!({ "skin": skin })))
 }
@@ -304,6 +384,11 @@ pub async fn create_skin(
     mut multipart: Multipart,
 ) -> ApiResult<impl IntoResponse> {
     let user = require_user(&state.pool, &cookies).await?;
+
+    let owner_org_id = match get_active_identity(&state.pool, &cookies).await? {
+        Some(ActiveIdentity::Org { id, .. }) => Some(id),
+        _ => None,
+    };
 
     let mut fields: HashMap<String, String> = HashMap::new();
     let mut image_bytes: Option<Vec<u8>> = None;
@@ -435,9 +520,9 @@ pub async fn create_skin(
     let inserted: (Uuid,) = sqlx::query_as(
         "INSERT INTO skins (
             slug, name, description, kind, piece_slot, variant,
-            image_url, tags, author_id, remixed_from
+            image_url, tags, author_id, remixed_from, owner_org_id
          )
-         VALUES ($1, $2, $3, $4::skin_kind, $5::skin_piece_slot, $6::skin_variant, $7, $8, $9, $10)
+         VALUES ($1, $2, $3, $4::skin_kind, $5::skin_piece_slot, $6::skin_variant, $7, $8, $9, $10, $11)
          RETURNING id",
     )
     .bind(&slug)
@@ -450,6 +535,7 @@ pub async fn create_skin(
     .bind(&tags)
     .bind(user.id)
     .bind(&remixed_from)
+    .bind(owner_org_id)
     .fetch_one(&state.pool)
     .await?;
 
@@ -473,20 +559,30 @@ pub async fn delete_skin(
 ) -> ApiResult<Json<Value>> {
     let user = require_user(&state.pool, &cookies).await?;
 
-    let existing: Option<(Uuid, Uuid, String)> = sqlx::query_as(
-        "SELECT id, author_id, image_url FROM skins WHERE slug = $1",
+    let existing: Option<(Uuid, Uuid, Option<Uuid>, String, String)> = sqlx::query_as(
+        "SELECT id, author_id, owner_org_id, image_url, kind::text FROM skins WHERE slug = $1",
     )
     .bind(&slug)
     .fetch_optional(&state.pool)
     .await?;
 
-    let Some((skin_id, author_id, image_url)) = existing else {
+    let Some((skin_id, author_id, owner_org_id, image_url, kind)) = existing else {
         return Err(ApiError::not_found("Skin not found"));
     };
 
-    if author_id != user.id && !user.is_staff() {
+    let (can_manage, _) =
+        skin_permissions(
+        &state.pool,
+        Some(&user),
+        author_id,
+        owner_org_id,
+        kind == "full",
+    )
+    .await?;
+
+    if !can_manage {
         return Err(ApiError::forbidden(
-            "Only the skin's author or staff can delete it",
+            "Only the skin's author, an org member, or staff can delete it",
         ));
     }
 

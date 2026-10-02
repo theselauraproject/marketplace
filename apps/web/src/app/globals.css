@@ -127,17 +127,6 @@ svg {
     color: var(--background);
 }
 
-/* =========================================================
-   Selaura Ring
-
-   A border whose color transitions from light (top) to dark
-   (bottom) around the whole shape, following the radius
-   exactly. Regular `border` can't do this — a solid gradient
-   painted as a border needs to be masked to a ring. Shared by
-   the buttons and surfaces below so they all bevel the same
-   way, no extra class needed on the elements themselves.
-   ========================================================= */
-
 .selaura-button-default,
 .selaura-button-muted,
 .selaura-button-footer,
@@ -193,10 +182,6 @@ svg {
     pointer-events: none;
 }
 
-/* =========================================================
-   Selaura Buttons
-   ========================================================= */
-
 .selaura-button-default {
     background: var(--foreground);
     color: var(--background);
@@ -230,10 +215,6 @@ svg {
 }
 
 
-/* =========================================================
-   Outline
-   ========================================================= */
-
 .selaura-button-outline {
     background: transparent;
     color: var(--foreground);
@@ -264,10 +245,6 @@ svg {
     cursor: not-allowed;
 }
 
-
-/* =========================================================
-   Muted
-   ========================================================= */
 
 .selaura-button-muted {
     background: var(--surface);
@@ -304,10 +281,6 @@ svg {
 }
 
 
-/* =========================================================
-   Footer
-   ========================================================= */
-
 .selaura-button-footer {
     background: var(--background);
     color: var(--foreground);
@@ -340,15 +313,6 @@ svg {
     cursor: not-allowed;
 }
 
-
-/* =========================================================
-   Depth / Surface
-
-   Shared "raised" treatment for cards and bordered panels:
-   the selaura-ring bevel plus an outer drop shadow for
-   elevation. Use anywhere that should read as part of the
-   same family as the buttons above.
-   ========================================================= */
 
 .selaura-surface {
     box-shadow: 0 8px 20px var(--shadow);

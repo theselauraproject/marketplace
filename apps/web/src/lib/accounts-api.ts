@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from "@/lib/api-client";
+import { apiFetch, publicApiUrl } from "@/lib/api-client";
 
 export interface Account {
   kind: "user" | "org";
@@ -49,7 +49,7 @@ export async function switchAccount(
 }
 
 export function getLinkAccountUrl(): string {
-  return apiUrl("/api/v1/auth/github/link");
+  return publicApiUrl("/api/v1/auth/github/link");
 }
 
 export async function unlinkAccount(id: string): Promise<ActiveIdentity | null> {

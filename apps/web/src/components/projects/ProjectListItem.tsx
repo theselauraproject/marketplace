@@ -24,7 +24,6 @@ export function ProjectListItem({ project }: ProjectListItemProps) {
           "group-hover:shadow-lg",
         ].join(" ")}
       >
-        {}
         <div
           className={[
             "h-14 w-14",
@@ -54,7 +53,6 @@ export function ProjectListItem({ project }: ProjectListItemProps) {
           )}
         </div>
 
-        {}
         <div className="min-w-0 flex-1 flex flex-col justify-center">
           <div className="flex items-center gap-2">
             <h3
@@ -88,7 +86,6 @@ export function ProjectListItem({ project }: ProjectListItemProps) {
           </p>
         </div>
 
-        {}
         <div
           className={[
             "shrink-0",

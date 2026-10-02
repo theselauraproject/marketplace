@@ -26,12 +26,18 @@ import type {
 import { ProjectCard } from "@/components/projects/ProjectCard";
 import { ProjectListItem } from "@/components/projects/ProjectListItem";
 import { getMetadata, type Metadata } from "@/lib/metadata-api";
+import { getRecommendedProjects } from "@/lib/projects-api";
 
 interface ProjectLibraryProps {
   projects: Project[];
 }
 
-type SortOption = "relevance" | "downloads" | "newest" | "updated" | "name";
+type SortOption =
+  | "recommended"
+  | "downloads"
+  | "newest"
+  | "updated"
+  | "name";
 
 type ViewMode = "card" | "list";
 
@@ -42,6 +48,7 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
   const searchParams = useSearchParams();
 
   const [metadata, setMetadata] = useState<Metadata | null>(null);
+  const [recommendedIds, setRecommendedIds] = useState<string[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +60,18 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
         }
       })
       .catch(() => {});
+
+    getRecommendedProjects()
+      .then((recProjects) => {
+        if (!cancelled) {
+          setRecommendedIds(recProjects.map((p) => p.id));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecommendedIds([]);
+        }
+      });
 
     return () => {
       cancelled = true;
@@ -106,13 +125,9 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
 
   const [categoriesOpen, setCategoriesOpen] = useState(true);
-
   const [versionsOpen, setVersionsOpen] = useState(false);
-
   const [loadersOpen, setLoadersOpen] = useState(false);
-
   const [environmentOpen, setEnvironmentOpen] = useState(false);
-
   const [resolutionsOpen, setResolutionsOpen] = useState(false);
 
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -127,7 +142,7 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
     }
 
     return counts;
-  }, [projects]);
+  }, [projects, PROJECT_TYPES]);
 
   const versionCounts = useMemo(() => {
     const counts = new Map<GameVersion, number>();
@@ -260,6 +275,16 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
 
     result.sort((a, b) => {
       switch (sort) {
+        case "recommended": {
+          const indexA = recommendedIds?.indexOf(a.id) ?? -1;
+          const indexB = recommendedIds?.indexOf(b.id) ?? -1;
+
+          if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+          if (indexA !== -1) return -1;
+          if (indexB !== -1) return 1;
+          return (b.downloads ?? 0) - (a.downloads ?? 0);
+        }
+
         case "downloads":
           return (b.downloads ?? 0) - (a.downloads ?? 0);
 
@@ -274,14 +299,13 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
             sensitivity: "base",
           });
 
-        case "relevance":
         default:
           return (b.downloads ?? 0) - (a.downloads ?? 0);
       }
     });
 
     return result;
-  }, [filteredProjects, sort]);
+  }, [filteredProjects, sort, recommendedIds]);
 
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE);
@@ -296,7 +320,6 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
   ]);
 
   const visibleProjects = sortedProjects.slice(0, visibleCount);
-
   const hasMore = visibleCount < sortedProjects.length;
 
   useEffect(() => {
@@ -375,7 +398,7 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
     setSelectedLoaders([]);
     setSelectedEnvironments([]);
     setSelectedResolutions([]);
-    setSort("relevance");
+    setSort("recommended");
   }
 
   const hasFilters =
@@ -388,8 +411,6 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
 
   return (
     <div>
-      {}
-
       <div className="relative">
         <Search
           size={19}
@@ -447,16 +468,12 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
         )}
       </div>
 
-      {}
-
       <div
         className={[
           "mt-8 grid gap-8",
           "lg:grid-cols-[230px_minmax(0,1fr)]",
         ].join(" ")}
       >
-        {}
-
         <aside>
           <div className={["pr-1", "scrollbar-thin"].join(" ")}>
             <div className="mb-3 flex items-center gap-2">
@@ -464,13 +481,10 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
                 size={15}
                 className="text-[var(--foreground)]/50"
               />
-
               <h2 className="text-sm font-semibold">Filters</h2>
             </div>
 
             <div className="space-y-1">
-              {}
-
               <FilterSection
                 label="Categories"
                 open={categoriesOpen}
@@ -494,8 +508,6 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
                 ))}
               </FilterSection>
 
-              {}
-
               <FilterSection
                 label="Game versions"
                 open={versionsOpen}
@@ -511,8 +523,6 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
                   />
                 ))}
               </FilterSection>
-
-              {}
 
               <FilterSection
                 label="Loaders"
@@ -530,8 +540,6 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
                 ))}
               </FilterSection>
 
-              {}
-
               <FilterSection
                 label="Environment"
                 open={environmentOpen}
@@ -547,8 +555,6 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
                   />
                 ))}
               </FilterSection>
-
-              {}
 
               <FilterSection
                 label="Resolution"
@@ -569,11 +575,7 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
           </div>
         </aside>
 
-        {}
-
         <section className="min-w-0">
-          {}
-
           <div
             className={[
               "mb-5 flex flex-wrap",
@@ -673,21 +675,15 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
                     "hover:bg-[var(--surface-hover)]",
                   ].join(" ")}
                 >
-                  <option value="relevance">Relevance</option>
-
+                  <option value="recommended">Recommended</option>
                   <option value="downloads">Most downloads</option>
-
                   <option value="newest">Newest</option>
-
                   <option value="updated">Recently updated</option>
-
                   <option value="name">A–Z</option>
                 </select>
               </label>
             </div>
           </div>
-
-          {}
 
           {hasFilters && (
             <div className="mb-5 flex flex-wrap gap-2">
@@ -738,8 +734,6 @@ export function ProjectLibrary({ projects }: ProjectLibraryProps) {
               ))}
             </div>
           )}
-
-          {}
 
           {filteredProjects.length === 0 ? (
             <EmptyState onClear={clearFilters} />
@@ -979,7 +973,7 @@ function getInitialSort(params: URLSearchParams): SortOption {
   const value = params.get("sort");
 
   if (
-    value === "relevance" ||
+    value === "recommended" ||
     value === "downloads" ||
     value === "newest" ||
     value === "updated" ||
@@ -988,7 +982,7 @@ function getInitialSort(params: URLSearchParams): SortOption {
     return value;
   }
 
-  return "relevance";
+  return "recommended";
 }
 
 function getTimestamp(value: string | undefined): number {

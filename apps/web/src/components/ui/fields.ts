@@ -1,0 +1,15 @@
+export const inputClass = [
+  "w-full",
+  "rounded-xl",
+  "border border-[var(--border)]",
+  "bg-[var(--background)]",
+  "px-3.5 py-2.5",
+  "text-sm",
+  "text-[var(--foreground)]",
+  "outline-none",
+  "transition",
+  "placeholder:text-[var(--faint)]",
+  "focus:border-[var(--foreground)]/30",
+  "focus:ring-2",
+  "focus:ring-[var(--foreground)]/5",
+].join(" ");

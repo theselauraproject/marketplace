@@ -1,33 +1,58 @@
+import { loadImage } from "@/lib/skin-image";
+import type { SkinVariant } from "@/lib/skins-api";
+
+export { loadImage };
+
 export const SKIN_CANVAS_SIZE = 64;
 
-// A flat, warm skin-tone fill used as a stand-in body for previewing a
-// single piece layer on its own (hair, headwear, a sleeve, etc). Pieces are
-// authored with everything except that one part transparent, so viewing the
-// raw file alone renders as a mostly-invisible body with a fragment floating
-// on it. Filling the whole 64x64 template with one color paints every UV
-// face consistently regardless of layout, so it reads as a plain body
-// instead of needing a hand-authored base skin asset.
-const NEUTRAL_BASE_SKIN_COLOR = "#caa06f";
+const NEUTRAL_BASE_GRAY = 176;
 
-let neutralBaseSkinUrl: string | null = null;
+const SIDE_TOP_LIGHTEN = 0.04;
+const SIDE_BOTTOM_DARKEN = 0.08;
 
-export function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Failed to load skin texture"));
-    img.src = src;
-  });
+function getBaseBoxes(
+  variant: SkinVariant,
+): ReadonlyArray<readonly [number, number, number, number, number]> {
+  const armWidth = variant === "slim" ? 3 : 4;
+
+  return [
+    [0, 0, 8, 8, 8],
+    [16, 16, 8, 12, 4],
+    [40, 16, armWidth, 12, 4],
+    [0, 16, 4, 12, 4],
+    [32, 48, armWidth, 12, 4],
+    [16, 48, 4, 12, 4],
+  ];
 }
 
-/**
- * A plain skin-toned 64x64 texture, generated once and cached, used as the
- * backdrop layer when previewing an individual piece.
- */
-export function getNeutralBaseSkinUrl(): string {
-  if (neutralBaseSkinUrl) {
-    return neutralBaseSkinUrl;
+const neutralBaseSkinUrls: Partial<Record<SkinVariant, string>> = {};
+
+function paintFace(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fade: boolean,
+) {
+  for (let py = 0; py < h; py++) {
+    const t = h > 1 ? py / (h - 1) : 0;
+    const factor = fade
+      ? 1 + SIDE_TOP_LIGHTEN * (1 - t) - SIDE_BOTTOM_DARKEN * t
+      : 1;
+
+    const value = Math.max(0, Math.min(255, Math.round(NEUTRAL_BASE_GRAY * factor)));
+
+    ctx.fillStyle = `rgb(${value}, ${value}, ${value})`;
+    ctx.fillRect(x, y + py, w, 1);
+  }
+}
+
+export function getNeutralBaseSkinUrl(variant: SkinVariant = "classic"): string {
+  const cached = neutralBaseSkinUrls[variant];
+
+  if (cached) {
+    return cached;
   }
 
   const canvas = document.createElement("canvas");
@@ -39,34 +64,31 @@ export function getNeutralBaseSkinUrl(): string {
     throw new Error("Canvas 2D is not supported in this browser");
   }
 
-  ctx.fillStyle = NEUTRAL_BASE_SKIN_COLOR;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (const [u, v, w, h, d] of getBaseBoxes(variant)) {
+    paintFace(ctx, u + d, v, w, d, false);
+    paintFace(ctx, u + d + w, v, w, d, false);
+    paintFace(ctx, u, v + d, d, h, true);
+    paintFace(ctx, u + d, v + d, w, h, true);
+    paintFace(ctx, u + d + w, v + d, d, h, true);
+    paintFace(ctx, u + 2 * d + w, v + d, w, h, true);
+  }
 
-  neutralBaseSkinUrl = canvas.toDataURL("image/png");
-  return neutralBaseSkinUrl;
+  const url = canvas.toDataURL("image/png");
+  neutralBaseSkinUrls[variant] = url;
+  return url;
 }
 
-/**
- * Composites a single piece layer over the neutral base so it previews as
- * "the piece on a plain body" instead of "the piece on nothing".
- */
 export async function compositePieceOverNeutralBase(
   pieceUrl: string,
+  variant: SkinVariant = "classic",
 ): Promise<string> {
   const canvas = await compositeSkinLayers([
-    getNeutralBaseSkinUrl(),
+    getNeutralBaseSkinUrl(variant),
     pieceUrl,
   ]);
   return canvas.toDataURL("image/png");
 }
 
-/**
- * Layers a stack of same-size skin textures onto a single canvas, in order —
- * later layers draw on top of earlier ones, and transparent pixels let the
- * layer underneath show through. Since every piece is authored against the
- * same 64x64 Minecraft skin template, stacking them lines the parts up
- * automatically without needing to know the UV layout.
- */
 export async function compositeSkinLayers(
   layerUrls: string[],
 ): Promise<HTMLCanvasElement> {
@@ -84,10 +106,52 @@ export async function compositeSkinLayers(
 
   for (const url of layerUrls) {
     const img = await loadImage(url);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    drawSkinLayer(ctx, img);
   }
 
   return canvas;
+}
+
+const LEGACY_MIRROR_COPIES: ReadonlyArray<
+  readonly [number, number, number, number, number, number]
+> = [
+  [4, 16, 4, 4, 20, 48],
+  [8, 16, 4, 4, 24, 48],
+  [0, 20, 4, 12, 24, 52],
+  [4, 20, 4, 12, 20, 52],
+  [8, 20, 4, 12, 16, 52],
+  [12, 20, 4, 12, 28, 52],
+  [44, 16, 4, 4, 36, 48],
+  [48, 16, 4, 4, 40, 48],
+  [40, 20, 4, 12, 40, 52],
+  [44, 20, 4, 12, 36, 52],
+  [48, 20, 4, 12, 32, 52],
+  [52, 20, 4, 12, 44, 52],
+];
+
+function drawSkinLayer(ctx: CanvasRenderingContext2D, img: HTMLImageElement) {
+  const isLegacy =
+    img.width === SKIN_CANVAS_SIZE && img.height === SKIN_CANVAS_SIZE / 2;
+
+  if (!isLegacy) {
+    ctx.drawImage(img, 0, 0, SKIN_CANVAS_SIZE, SKIN_CANVAS_SIZE);
+    return;
+  }
+
+  const source = document.createElement("canvas");
+  source.width = img.width;
+  source.height = img.height;
+  source.getContext("2d")?.drawImage(img, 0, 0);
+
+  ctx.drawImage(img, 0, 0);
+
+  for (const [sx, sy, w, h, dx, dy] of LEGACY_MIRROR_COPIES) {
+    ctx.save();
+    ctx.translate(dx + w, dy);
+    ctx.scale(-1, 1);
+    ctx.drawImage(source, sx, sy, w, h, 0, 0, w, h);
+    ctx.restore();
+  }
 }
 
 export function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {

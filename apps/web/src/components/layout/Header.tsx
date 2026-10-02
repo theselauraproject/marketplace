@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { LogOut, Menu, Moon, Sun, X } from "lucide-react";
 
 import Button from "@/components/ui/Button";
-import { apiUrl } from "@/lib/api-client";
+import { publicApiUrl } from "@/lib/api-client";
 import { useCurrentUser } from "@/lib/use-current-user";
 import { AccountSwitcher } from "./AccountSwitcher";
 import type { ActiveIdentity } from "@/lib/accounts-api";
@@ -17,7 +17,7 @@ export function Header() {
 
   const { user, activeIdentity, loading, refetch, logout } = useCurrentUser();
 
-  const githubLoginUrl = apiUrl("/api/v1/auth/github");
+  const githubLoginUrl = publicApiUrl("/api/v1/auth/github");
 
   const isStaff = user?.role === "admin" || user?.role === "moderator";
 
@@ -64,7 +64,6 @@ export function Header() {
             "px-4 sm:px-6",
           ].join(" ")}
         >
-          {}
 
           <Link
             href="/"
@@ -77,8 +76,6 @@ export function Header() {
               className={["block", "h-[26px] w-auto", "sm:h-[28px]"].join(" ")}
             />
           </Link>
-
-          {}
 
           <nav
             className={[
@@ -97,14 +94,11 @@ export function Header() {
             )}
           </nav>
 
-          {}
-
           <div
             className={["ml-auto flex shrink-0", "items-center gap-2"].join(
               " ",
             )}
           >
-            {}
 
             <Button
               type="button"
@@ -125,8 +119,6 @@ export function Header() {
               )}
             </Button>
 
-            {}
-
             <div className="hidden items-center gap-2 sm:flex">
               {!loading && user ? (
                 <UserCluster
@@ -145,8 +137,6 @@ export function Header() {
                 </Button>
               )}
             </div>
-
-            {}
 
             <Button
               type="button"
@@ -167,8 +157,6 @@ export function Header() {
             </Button>
           </div>
         </div>
-
-        {}
 
         <div
           className={[
@@ -231,7 +219,11 @@ export function Header() {
                 {!loading && user ? (
                   <div className="flex items-center gap-3 px-3 py-2">
                     <Link
-                      href={`/u/${user.username}`}
+                      href={
+                        activeIdentity?.kind === "org"
+                          ? `/org/${activeIdentity.username}`
+                          : `/u/${activeIdentity?.username ?? user.username}`
+                      }
                       onClick={closeMenu}
                       className="flex min-w-0 flex-1 items-center gap-3"
                     >
@@ -268,8 +260,6 @@ export function Header() {
           </div>
         </div>
       </header>
-
-      {}
 
       <div className="h-16 shrink-0" aria-hidden="true" />
     </>

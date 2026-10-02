@@ -6,10 +6,13 @@ import {
   SkinViewer3D,
   type SkinViewerFocus,
 } from "@/components/skins/SkinViewer3D";
-import { compositePieceOverNeutralBase } from "@/lib/skin-compositor";
+import {
+  compositePieceOverNeutralBase,
+  compositeSkinLayers,
+  getNeutralBaseSkinUrl,
+} from "@/lib/skin-compositor";
 import type { SkinKind, SkinSlot, SkinVariant } from "@/lib/skins-api";
 
-/** Which body part a piece slot should zoom the preview in on. */
 export function getFocusForSlot(slot: SkinSlot | undefined): SkinViewerFocus {
   switch (slot) {
     case "hair":
@@ -36,33 +39,30 @@ interface SkinThumbnailProps {
   imageUrl: string;
   name: string;
   variant?: SkinVariant;
-  /** When "piece", the raw layer is composited over a neutral base body and
-   *  the camera zooms into pieceSlot's body part, instead of showing the
-   *  bare (mostly transparent) layer on its own. */
   kind?: SkinKind;
   pieceSlot?: SkinSlot | null;
+  layersBefore?: string[];
+  layersAfter?: string[];
   width?: number;
   height?: number;
 }
 
-/**
- * Renders the real 3D preview once the thumbnail actually scrolls into
- * view, and a lightweight flat texture before that — a grid of dozens of
- * live WebGL viewers all at once would blow past browsers' concurrent
- * context limits.
- */
 export function SkinThumbnail({
   imageUrl,
   name,
   variant,
   kind = "full",
   pieceSlot,
+  layersBefore,
+  layersAfter,
   width = 140,
   height = 170,
 }: SkinThumbnailProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [inView, setInView] = useState(false);
-  const [previewSrc, setPreviewSrc] = useState(imageUrl);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(
+    kind === "piece" ? null : imageUrl,
+  );
 
   useEffect(() => {
     const node = containerRef.current;
@@ -73,10 +73,7 @@ export function SkinThumbnail({
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setInView(true);
-          observer.disconnect();
-        }
+        setInView(Boolean(entries[entries.length - 1]?.isIntersecting));
       },
       { rootMargin: "150px" },
     );
@@ -84,6 +81,9 @@ export function SkinThumbnail({
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
+
+  const beforeKey = JSON.stringify(layersBefore ?? []);
+  const afterKey = JSON.stringify(layersAfter ?? []);
 
   useEffect(() => {
     if (kind !== "piece") {
@@ -93,7 +93,20 @@ export function SkinThumbnail({
 
     let cancelled = false;
 
-    compositePieceOverNeutralBase(imageUrl)
+    const before: string[] = JSON.parse(beforeKey);
+    const after: string[] = JSON.parse(afterKey);
+
+    const work =
+      before.length > 0 || after.length > 0
+        ? compositeSkinLayers([
+            getNeutralBaseSkinUrl(variant ?? "classic"),
+            ...before,
+            imageUrl,
+            ...after,
+          ]).then((canvas) => canvas.toDataURL("image/png"))
+        : compositePieceOverNeutralBase(imageUrl, variant ?? "classic");
+
+    work
       .then((url) => {
         if (!cancelled) {
           setPreviewSrc(url);
@@ -101,14 +114,14 @@ export function SkinThumbnail({
       })
       .catch(() => {
         if (!cancelled) {
-          setPreviewSrc(imageUrl);
+          setPreviewSrc(null);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, kind]);
+  }, [imageUrl, kind, variant, beforeKey, afterKey]);
 
   return (
     <div
@@ -116,7 +129,7 @@ export function SkinThumbnail({
       className="flex items-center justify-center"
       style={{ width: "100%", height }}
     >
-      {inView ? (
+      {inView && previewSrc ? (
         <SkinViewer3D
           src={previewSrc}
           model={variant === "slim" ? "slim" : "default"}

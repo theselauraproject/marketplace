@@ -4,7 +4,7 @@ import { apiFetch, apiUrl } from "@/lib/api-client";
 
 export async function getProjects(): Promise<Project[]> {
   const response = await fetch(apiUrl("/api/v1/projects"), {
-    next: { revalidate: 30 },
+    cache: "no-store",
   });
 
   if (!response.ok) {
@@ -81,26 +81,46 @@ export async function getProjectBySlug(
   return (await response.json()) as ProjectDetail;
 }
 
+export async function getRecommendedProjects(): Promise<Project[]> {
+  const response = await apiFetch("/api/v1/recommendations");
+
+  if (!response.ok) {
+    return [];
+  }
+
+  const data = (await response.json()) as { projects?: Project[] };
+  return data.projects ?? [];
+}
+
 export interface UpdateProjectInput {
   name?: string;
   description?: string;
   readme?: string;
+  type?: string;
   tags?: string[];
+  icon?: File;
+  header?: File;
 }
 
-/**
- * Edits a project the current user (or their active org) can manage.
- * The server always sends the listing back to "pending" for re-approval
- * after an edit, so the updated fields won't reflect in the public
- * library until a moderator reviews them again.
- */
 export async function updateProject(
   slug: string,
   input: UpdateProjectInput,
 ): Promise<Project & { status: string }> {
+  const formData = new FormData();
+
+  if (input.name !== undefined) formData.append("name", input.name);
+  if (input.description !== undefined)
+    formData.append("description", input.description);
+  if (input.readme !== undefined) formData.append("readme", input.readme);
+  if (input.type !== undefined) formData.append("type", input.type);
+  if (input.tags !== undefined)
+    formData.append("tags", JSON.stringify(input.tags));
+  if (input.icon) formData.append("icon", input.icon);
+  if (input.header) formData.append("header", input.header);
+
   const response = await apiFetch(`/api/v1/projects/${encodeURIComponent(slug)}`, {
     method: "PATCH",
-    body: JSON.stringify(input),
+    body: formData,
   });
 
   const responseText = await response.text();
@@ -110,7 +130,6 @@ export async function updateProject(
     try {
       data = JSON.parse(responseText);
     } catch {
-      // Ignore — handled by the !response.ok branch below.
     }
   }
 
@@ -134,10 +153,33 @@ export async function deleteProject(slug: string): Promise<void> {
       try {
         data = JSON.parse(responseText);
       } catch {
-        // Ignore — falls through to the generic message below.
       }
     }
 
     throw new Error(data.error ?? `Failed to delete project (${response.status})`);
   }
+}
+
+export async function toggleProjectLike(
+  slug: string,
+): Promise<{ liked: boolean; likesCount: number }> {
+  const response = await apiFetch(`/api/v1/projects/${encodeURIComponent(slug)}/like`, {
+    method: "POST",
+  });
+
+  const responseText = await response.text();
+  let data: { liked?: boolean; likesCount?: number; error?: string } = {};
+
+  if (responseText) {
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+    }
+  }
+
+  if (!response.ok || typeof data.liked !== "boolean") {
+    throw new Error(data.error ?? `Failed to like project (${response.status})`);
+  }
+
+  return { liked: data.liked, likesCount: data.likesCount ?? 0 };
 }

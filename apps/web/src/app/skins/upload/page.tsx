@@ -6,6 +6,7 @@ import { Upload } from "lucide-react";
 
 import Button from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { PublishingAs } from "@/components/ui/PublishingAs";
 import { SkinViewer3D } from "@/components/skins/SkinViewer3D";
 import { compositePieceOverNeutralBase, loadImage } from "@/lib/skin-compositor";
 import { getFocusForSlot } from "@/components/skins/SkinThumbnail";
@@ -16,22 +17,9 @@ import {
   type SkinSlot,
   type SkinVariant,
 } from "@/lib/skins-api";
+import { inputClass } from "@/components/ui/fields";
 
-const inputClass = [
-  "w-full",
-  "rounded-xl",
-  "border border-[var(--border)]",
-  "bg-[var(--background)]",
-  "px-3.5 py-2.5",
-  "text-sm",
-  "text-[var(--foreground)]",
-  "outline-none",
-  "transition",
-  "placeholder:text-[var(--faint)]",
-  "focus:border-[var(--foreground)]/30",
-  "focus:ring-2",
-  "focus:ring-[var(--foreground)]/5",
-].join(" ");
+const ARM_SLOTS: SkinSlot[] = ["sleeve_left", "sleeve_right"];
 
 export default function UploadSkinPage() {
   const router = useRouter();
@@ -49,6 +37,9 @@ export default function UploadSkinPage() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const asksArmModel = kind === "full" || ARM_SLOTS.includes(slot);
+  const effectiveVariant: SkinVariant = asksArmModel ? variant : "classic";
+
   useEffect(() => {
     if (!file) {
       setPreviewUrl(null);
@@ -61,9 +52,6 @@ export default function UploadSkinPage() {
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  // Pieces are authored with everything but their one part transparent, so
-  // preview them over a plain skin-toned body instead of the raw (mostly
-  // invisible) layer.
   const [compositedPreviewUrl, setCompositedPreviewUrl] = useState<
     string | null
   >(null);
@@ -76,7 +64,7 @@ export default function UploadSkinPage() {
 
     let cancelled = false;
 
-    compositePieceOverNeutralBase(previewUrl)
+    compositePieceOverNeutralBase(previewUrl, effectiveVariant)
       .then((url) => {
         if (!cancelled) {
           setCompositedPreviewUrl(url);
@@ -91,7 +79,7 @@ export default function UploadSkinPage() {
     return () => {
       cancelled = true;
     };
-  }, [previewUrl, kind]);
+  }, [previewUrl, kind, effectiveVariant]);
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0] ?? null;
@@ -163,7 +151,7 @@ export default function UploadSkinPage() {
         description,
         kind,
         pieceSlot: kind === "piece" ? slot : undefined,
-        variant,
+        variant: effectiveVariant,
         tags,
         file,
         fileName: file.name,
@@ -183,7 +171,7 @@ export default function UploadSkinPage() {
         Upload a skin
       </h1>
 
-      <p className="mb-8 text-sm text-[var(--foreground)]/55">
+      <p className="mb-4 text-sm text-[var(--foreground)]/55">
         Share a full skin, or just a piece — hair, a jacket, shoes, whatever —
         for other people to remix in the{" "}
         <a href="/skins/builder" className="underline underline-offset-2">
@@ -191,6 +179,8 @@ export default function UploadSkinPage() {
         </a>
         .
       </p>
+
+      <PublishingAs className="mb-8" />
 
       <form
         onSubmit={handleSubmit}
@@ -278,6 +268,7 @@ export default function UploadSkinPage() {
             </div>
           )}
 
+          {asksArmModel && (
           <div>
             <label className="mb-2 block text-sm font-medium">
               Arm model
@@ -299,6 +290,7 @@ export default function UploadSkinPage() {
               </KindOption>
             </div>
           </div>
+          )}
 
           <div>
             <label className="mb-2 block text-sm font-medium">
@@ -330,14 +322,14 @@ export default function UploadSkinPage() {
               Preview
             </p>
 
-            {previewUrl ? (
+            {previewUrl && (kind !== "piece" || compositedPreviewUrl) ? (
               <SkinViewer3D
                 src={
                   kind === "piece"
                     ? (compositedPreviewUrl ?? previewUrl)
                     : previewUrl
                 }
-                model={variant === "slim" ? "slim" : "default"}
+                model={effectiveVariant === "slim" ? "slim" : "default"}
                 focus={kind === "piece" ? getFocusForSlot(slot) : "full"}
                 width={220}
                 height={280}

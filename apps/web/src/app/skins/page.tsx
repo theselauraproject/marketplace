@@ -2,18 +2,63 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, Wand2 } from "lucide-react";
+import { Plus, Wand2 } from "lucide-react";
 
 import Button from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { SkinSearchInput } from "@/components/skins/SkinSearchInput";
 import { SkinThumbnail } from "@/components/skins/SkinThumbnail";
-import { getSkins, SKIN_SLOTS, type Skin, type SkinKind } from "@/lib/skins-api";
+import {
+  getSkins,
+  SKIN_SLOTS,
+  type Skin,
+  type SkinKind,
+  type SkinSlot,
+} from "@/lib/skins-api";
 
 type KindFilter = "all" | SkinKind;
+type SlotFilter = "all" | SkinSlot;
+
+const KIND_OPTIONS: [KindFilter, string][] = [
+  ["all", "All"],
+  ["full", "Full skins"],
+  ["piece", "Pieces"],
+];
+
+const SLOT_OPTIONS: [SlotFilter, string][] = [
+  ["all", "Any piece"],
+  ...SKIN_SLOTS.map((slot): [SlotFilter, string] => [slot.value, slot.label]),
+];
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "rounded-lg px-3 py-2 text-xs font-medium transition",
+        active
+          ? "bg-[var(--surface-hover)] text-[var(--foreground)]"
+          : "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]",
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
 
 export default function SkinsPage() {
   const [skins, setSkins] = useState<Skin[] | null>(null);
   const [kind, setKind] = useState<KindFilter>("all");
+  const [slot, setSlot] = useState<SlotFilter>("all");
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +70,8 @@ export default function SkinsPage() {
     const timer = setTimeout(() => {
       getSkins({
         kind: kind === "all" ? undefined : kind,
-        q: query || undefined,
+        slot: kind === "piece" && slot !== "all" ? slot : undefined,
+        q: query.trim() || undefined,
       })
         .then((result) => {
           if (!cancelled) setSkins(result);
@@ -39,7 +85,7 @@ export default function SkinsPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [kind, query]);
+  }, [kind, slot, query]);
 
   const slotLabels = useMemo(
     () => Object.fromEntries(SKIN_SLOTS.map((s) => [s.value, s.label])),
@@ -68,44 +114,40 @@ export default function SkinsPage() {
         </div>
       </div>
 
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <div className="relative w-full max-w-xs">
-          <Search
-            size={15}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--faint)]"
-          />
-
-          <input
+      <div className="mb-6 space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <SkinSearchInput
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search skins…"
-            className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] py-2 pl-9 pr-3 text-sm outline-none transition placeholder:text-[var(--faint)] focus:border-[var(--foreground)]/30"
+            onChange={setQuery}
+            className="max-w-xs"
           />
+
+          <div className="flex gap-1.5">
+            {KIND_OPTIONS.map(([value, label]) => (
+              <FilterChip
+                key={value}
+                active={kind === value}
+                onClick={() => setKind(value)}
+              >
+                {label}
+              </FilterChip>
+            ))}
+          </div>
         </div>
 
-        <div className="flex gap-1.5">
-          {(
-            [
-              ["all", "All"],
-              ["full", "Full skins"],
-              ["piece", "Pieces"],
-            ] as [KindFilter, string][]
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setKind(value)}
-              className={[
-                "rounded-lg px-3 py-2 text-xs font-medium transition",
-                kind === value
-                  ? "bg-[var(--surface-hover)] text-[var(--foreground)]"
-                  : "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]",
-              ].join(" ")}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {kind === "piece" && (
+          <div className="flex flex-wrap gap-1.5">
+            {SLOT_OPTIONS.map(([value, label]) => (
+              <FilterChip
+                key={value}
+                active={slot === value}
+                onClick={() => setSlot(value)}
+              >
+                {label}
+              </FilterChip>
+            ))}
+          </div>
+        )}
       </div>
 
       {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
@@ -116,7 +158,9 @@ export default function SkinsPage() {
 
       {skins && skins.length === 0 && (
         <Card className="p-8 text-center text-sm text-[var(--foreground)]/50">
-          No skins match yet — be the first to upload one.
+          {query.trim()
+            ? "Nothing matches that search."
+            : "No skins match yet — be the first to upload one."}
         </Card>
       )}
 
