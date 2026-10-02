@@ -15,6 +15,7 @@ import {
 import type { ProjectType } from "@selaura/types";
 
 import { ProjectMarkdownEditor } from "@/components/projects/ProjectMarkdownEditor";
+import Button from "@/components/ui/Button";
 import { apiFetch } from "@/lib/api-client";
 import { getMetadata, type Metadata } from "@/lib/metadata-api";
 
@@ -494,27 +495,13 @@ export default function UploadPage() {
         {}
 
         <div className="flex justify-end">
-          <button
+          <Button
             type="submit"
             disabled={submitting}
-            className={[
-              "inline-flex",
-              "items-center gap-2",
-              "rounded-xl",
-              "bg-[var(--foreground)]",
-              "px-5 py-2.5",
-              "text-sm font-semibold",
-              "text-[var(--background)]",
-              "transition",
-              "hover:opacity-90",
-              "disabled:cursor-not-allowed",
-              "disabled:opacity-50",
-            ].join(" ")}
+            icon={<Upload size={16} />}
           >
-            <Upload size={16} />
-
             {submitting ? "Submitting..." : "Submit project"}
-          </button>
+          </Button>
         </div>
       </form>
     </main>

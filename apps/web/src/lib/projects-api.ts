@@ -1,6 +1,6 @@
 import type { Project } from "@selaura/types";
 
-import { apiUrl } from "@/lib/api-client";
+import { apiFetch, apiUrl } from "@/lib/api-client";
 
 export async function getProjects(): Promise<Project[]> {
   const response = await fetch(apiUrl("/api/v1/projects"), {
@@ -79,4 +79,65 @@ export async function getProjectBySlug(
   }
 
   return (await response.json()) as ProjectDetail;
+}
+
+export interface UpdateProjectInput {
+  name?: string;
+  description?: string;
+  readme?: string;
+  tags?: string[];
+}
+
+/**
+ * Edits a project the current user (or their active org) can manage.
+ * The server always sends the listing back to "pending" for re-approval
+ * after an edit, so the updated fields won't reflect in the public
+ * library until a moderator reviews them again.
+ */
+export async function updateProject(
+  slug: string,
+  input: UpdateProjectInput,
+): Promise<Project & { status: string }> {
+  const response = await apiFetch(`/api/v1/projects/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+
+  const responseText = await response.text();
+  let data: { project?: Project & { status: string }; error?: string } = {};
+
+  if (responseText) {
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      // Ignore — handled by the !response.ok branch below.
+    }
+  }
+
+  if (!response.ok || !data.project) {
+    throw new Error(data.error ?? `Failed to update project (${response.status})`);
+  }
+
+  return data.project;
+}
+
+export async function deleteProject(slug: string): Promise<void> {
+  const response = await apiFetch(`/api/v1/projects/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    let data: { error?: string } = {};
+
+    if (responseText) {
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        // Ignore — falls through to the generic message below.
+      }
+    }
+
+    throw new Error(data.error ?? `Failed to delete project (${response.status})`);
+  }
 }

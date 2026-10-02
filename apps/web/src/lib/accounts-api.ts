@@ -51,3 +51,39 @@ export async function switchAccount(
 export function getLinkAccountUrl(): string {
   return apiUrl("/api/v1/auth/github/link");
 }
+
+export async function unlinkAccount(id: string): Promise<ActiveIdentity | null> {
+  const response = await apiFetch(`/api/v1/auth/accounts/users/${id}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.error ?? "Failed to remove account");
+  }
+
+  const data = (await response.json()) as {
+    activeIdentity: ActiveIdentity | null;
+  };
+
+  return data.activeIdentity;
+}
+
+export async function leaveOrganization(
+  id: string,
+): Promise<ActiveIdentity | null> {
+  const response = await apiFetch(`/api/v1/auth/accounts/orgs/${id}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.error ?? "Failed to remove organization");
+  }
+
+  const data = (await response.json()) as {
+    activeIdentity: ActiveIdentity | null;
+  };
+
+  return data.activeIdentity;
+}

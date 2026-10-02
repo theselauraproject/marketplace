@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use axum::{
     http::{HeaderValue, Method},
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post},
     Router,
 };
 use sqlx::PgPool;
@@ -84,11 +84,18 @@ async fn main() {
         .route("/auth/me", get(routes::auth::me))
         .route("/auth/logout", post(routes::auth::logout))
         .route("/auth/accounts", get(routes::auth::list_accounts))
+        .route("/auth/accounts/users/:id", delete(routes::auth::unlink_account))
+        .route("/auth/accounts/orgs/:id", delete(routes::auth::leave_organization))
         .route("/auth/switch", post(routes::auth::switch_account))
+        .route("/users/me", patch(routes::users::update_profile))
+        .route("/users/me/featured-skin", patch(routes::users::set_featured_skin))
+        .route("/users/:username", get(routes::users::get_user_profile))
+        .route("/skins", get(routes::skins::list_skins).post(routes::skins::create_skin))
+        .route("/skins/:slug", get(routes::skins::get_skin).delete(routes::skins::delete_skin))
         .route("/projects", get(routes::projects::list_projects).post(routes::projects::create_project))
         .route("/projects/search", get(routes::projects::search_projects))
         .route("/projects/moderation/queue", get(routes::projects::moderation_queue))
-        .route("/projects/:slug", get(routes::projects::get_project).delete(routes::projects::delete_project))
+        .route("/projects/:slug", get(routes::projects::get_project).patch(routes::projects::update_project).delete(routes::projects::delete_project))
         .route("/projects/:slug/status", patch(routes::projects::update_status))
         .route("/projects/:slug/versions", post(routes::projects::create_version))
         .route("/versions/:id/download", get(routes::projects::download_version))

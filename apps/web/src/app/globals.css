@@ -15,19 +15,22 @@
 
     --shadow: rgba(0, 0, 0, 0.12);
 
-    --ring-top: rgba(255, 255, 255, 0.9);
+    --ring-top: rgba(255, 255, 255, 0.7);
     --ring-bottom: rgba(0, 0, 0, 0.16);
 
     --ring-top-inverse: rgba(255, 255, 255, 0.18);
     --ring-bottom-inverse: rgba(0, 0, 0, 0.55);
 
-    --ring-top-surface: rgba(255, 255, 255, 0.5);
+    --ring-top-surface: rgba(255, 255, 255, 0.4);
     --ring-bottom-surface: rgba(0, 0, 0, 0.1);
 
     --success: #1f9d55;
     --success-bg: rgba(31, 157, 85, 0.12);
     --danger: #d43f5f;
     --danger-bg: rgba(212, 63, 95, 0.12);
+    --warning: #b7791f;
+    --warning-bg: #f7c948;
+    --warning-foreground: #2b1d02;
 }
 
 html[data-theme="dark"] {
@@ -45,19 +48,22 @@ html[data-theme="dark"] {
 
     --shadow: rgba(0, 0, 0, 0.45);
 
-    --ring-top: rgba(255, 255, 255, 0.14);
+    --ring-top: rgba(255, 255, 255, 0.1);
     --ring-bottom: rgba(0, 0, 0, 0.55);
 
     --ring-top-inverse: rgba(255, 255, 255, 0.9);
     --ring-bottom-inverse: rgba(0, 0, 0, 0.16);
 
-    --ring-top-surface: rgba(255, 255, 255, 0.09);
+    --ring-top-surface: rgba(255, 255, 255, 0.07);
     --ring-bottom-surface: rgba(0, 0, 0, 0.4);
 
     --success: #2ecc71;
     --success-bg: rgba(46, 204, 113, 0.14);
     --danger: #ff5c7c;
     --danger-bg: rgba(255, 92, 124, 0.14);
+    --warning: #f7c948;
+    --warning-bg: #caa237;
+    --warning-foreground: #241a02;
 }
 
 html {
@@ -134,6 +140,7 @@ svg {
 
 .selaura-button-default,
 .selaura-button-muted,
+.selaura-button-footer,
 .selaura-surface {
     position: relative;
 }
@@ -150,6 +157,11 @@ svg {
     background: linear-gradient(180deg, var(--ring-top), var(--ring-bottom));
 }
 
+.selaura-button-footer::before {
+    background: linear-gradient(180deg, var(--ring-top), var(--ring-bottom));
+    opacity: 0.6;
+}
+
 .selaura-surface::before {
     background: linear-gradient(
         180deg,
@@ -160,6 +172,7 @@ svg {
 
 .selaura-button-default::before,
 .selaura-button-muted::before,
+.selaura-button-footer::before,
 .selaura-surface::before {
     content: "";
     position: absolute;
@@ -284,7 +297,9 @@ svg {
     cursor: not-allowed;
 }
 
-.selaura-button-muted:disabled::before {
+.selaura-button-default:disabled::before,
+.selaura-button-muted:disabled::before,
+.selaura-button-footer:disabled::before {
     display: none;
 }
 

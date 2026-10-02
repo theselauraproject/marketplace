@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 
 import { MarkdownRenderer } from "@/components/ui/MarkdownRenderer";
+import Button from "@/components/ui/Button";
 
 interface ProjectMarkdownEditorProps {
   value: string;
@@ -745,29 +746,13 @@ function MarkdownDialog({
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg px-3 py-2 text-xs font-medium text-[var(--muted)] hover:bg-[var(--surface-hover)]"
-          >
+          <Button type="button" variant="muted" onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
 
-          <button
-            type="submit"
-            disabled={!value.trim()}
-            className={[
-              "rounded-lg",
-              "bg-[var(--foreground)]",
-              "px-3.5 py-2",
-              "text-xs font-semibold",
-              "text-[var(--background)]",
-              "disabled:cursor-not-allowed",
-              "disabled:opacity-40",
-            ].join(" ")}
-          >
+          <Button type="submit" disabled={!value.trim()}>
             Insert
-          </button>
+          </Button>
         </div>
       </form>
     </div>

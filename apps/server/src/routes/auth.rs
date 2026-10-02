@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::{IntoResponse, Redirect},
     Json,
 };
@@ -48,6 +48,13 @@ fn github_authorize_url(state: &Arc<AppState>, oauth_state: &str) -> String {
         ),
         ("scope", OAUTH_SCOPE),
         ("state", oauth_state),
+        // Without this, GitHub silently re-authenticates as whichever
+        // account already has an active github.com session in the
+        // browser, so "Add account" just re-added the same account
+        // instead of letting the person pick a different one.
+        // `prompt=select_account` forces GitHub's account picker to show
+        // every time, even when there's only one signed-in session.
+        ("prompt", "select_account"),
     ];
 
     let query = serde_urlencoded::to_string(params).unwrap_or_default();
@@ -82,7 +89,7 @@ async fn upsert_github_user(
     let github_id = github_user.id.to_string();
 
     let existing: Option<User> = sqlx::query_as::<_, User>(
-        "SELECT id, github_id, username, email, avatar_url, role::text as role, created_at, updated_at \
+        "SELECT id, github_id, username, email, avatar_url, role::text as role, bio, discord_url, website_url, created_at, updated_at \
          FROM users WHERE github_id = $1",
     )
     .bind(&github_id)
@@ -100,7 +107,7 @@ async fn upsert_github_user(
         sqlx::query_as::<_, User>(
             "UPDATE users SET username = $1, email = $2, avatar_url = $3, updated_at = now() \
              WHERE github_id = $4 \
-             RETURNING id, github_id, username, email, avatar_url, role::text as role, created_at, updated_at",
+             RETURNING id, github_id, username, email, avatar_url, role::text as role, bio, discord_url, website_url, created_at, updated_at",
         )
         .bind(&github_user.login)
         .bind(&email)
@@ -114,7 +121,7 @@ async fn upsert_github_user(
         sqlx::query_as::<_, User>(
             "INSERT INTO users (github_id, username, email, avatar_url, role) \
              VALUES ($1, $2, $3, $4, $5::user_role) \
-             RETURNING id, github_id, username, email, avatar_url, role::text as role, created_at, updated_at",
+             RETURNING id, github_id, username, email, avatar_url, role::text as role, bio, discord_url, website_url, created_at, updated_at",
         )
         .bind(&github_id)
         .bind(&github_user.login)
@@ -245,7 +252,7 @@ pub async fn me(State(state): State<Arc<AppState>>, cookies: Cookies) -> ApiResu
         .ok_or_else(|| ApiError::unauthorized("Session expired"))?;
 
     let user: Option<User> = sqlx::query_as::<_, User>(
-        "SELECT id, github_id, username, email, avatar_url, role::text as role, created_at, updated_at \
+        "SELECT id, github_id, username, email, avatar_url, role::text as role, bio, discord_url, website_url, created_at, updated_at \
          FROM users WHERE id = $1",
     )
     .bind(session.user_id)
@@ -287,6 +294,7 @@ pub async fn list_accounts(
 
     let linked: Vec<User> = sqlx::query_as::<_, User>(
         "SELECT u.id, u.github_id, u.username, u.email, u.avatar_url, u.role::text as role, \
+                u.bio, u.discord_url, u.website_url, \
                 u.created_at, u.updated_at \
          FROM linked_accounts la \
          JOIN users u ON u.id = CASE WHEN la.user_a_id = $1 THEN la.user_b_id ELSE la.user_a_id END \
@@ -412,4 +420,98 @@ pub async fn switch_account(
     let active_identity = get_active_identity(&state.pool, &cookies).await?;
 
     Ok(Json(json!({ "activeIdentity": active_identity })))
+}
+
+/// Unlinks a linked GitHub account from the current user. This only removes
+/// the local link between the two Selaura accounts — it doesn't touch
+/// anything on GitHub's side, so the other account can always be re-linked
+/// later by signing in and linking again.
+pub async fn unlink_account(
+    State(state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let user = require_user(&state.pool, &cookies).await?;
+
+    if id == user.id {
+        return Err(ApiError::bad_request(
+            "You can't remove the account you're currently signed in with",
+        ));
+    }
+
+    let session_id = cookies
+        .get(SESSION_COOKIE)
+        .map(|c| c.value().to_string())
+        .ok_or_else(|| ApiError::unauthorized("Not authenticated"))?;
+
+    let session = get_session(&state.pool, &session_id)
+        .await?
+        .ok_or_else(|| ApiError::unauthorized("Session expired"))?;
+
+    let result = sqlx::query(
+        "DELETE FROM linked_accounts \
+         WHERE (user_a_id = $1 AND user_b_id = $2) \
+            OR (user_a_id = $2 AND user_b_id = $1)",
+    )
+    .bind(user.id)
+    .bind(id)
+    .execute(&state.pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(ApiError::not_found("That account isn't linked to yours"));
+    }
+
+    // If we were currently posting as the account we just unlinked, fall
+    // back to the primary account rather than leaving a dangling identity.
+    if session.acting_as_user_id == Some(id) {
+        set_acting_as(&state.pool, &session_id, None, None).await?;
+    }
+
+    let active_identity = get_active_identity(&state.pool, &cookies).await?;
+
+    Ok(Json(json!({ "success": true, "activeIdentity": active_identity })))
+}
+
+/// Removes a GitHub organization from the current user's account switcher.
+/// This only clears Selaura's local record of the membership — if the user
+/// is still actually a member on GitHub, the next time they sign in with
+/// GitHub the organization will be re-synced and reappear.
+pub async fn leave_organization(
+    State(state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let user = require_user(&state.pool, &cookies).await?;
+
+    let session_id = cookies
+        .get(SESSION_COOKIE)
+        .map(|c| c.value().to_string())
+        .ok_or_else(|| ApiError::unauthorized("Not authenticated"))?;
+
+    let session = get_session(&state.pool, &session_id)
+        .await?
+        .ok_or_else(|| ApiError::unauthorized("Session expired"))?;
+
+    let result = sqlx::query(
+        "DELETE FROM organization_members WHERE org_id = $1 AND user_id = $2",
+    )
+    .bind(id)
+    .bind(user.id)
+    .execute(&state.pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(ApiError::not_found(
+            "You're not a member of that organization",
+        ));
+    }
+
+    if session.acting_as_org_id == Some(id) {
+        set_acting_as(&state.pool, &session_id, None, None).await?;
+    }
+
+    let active_identity = get_active_identity(&state.pool, &cookies).await?;
+
+    Ok(Json(json!({ "success": true, "activeIdentity": active_identity })))
 }

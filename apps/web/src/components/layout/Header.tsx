@@ -88,6 +88,8 @@ export function Header() {
           >
             <NavLink href="/library">Explore library</NavLink>
 
+            <NavLink href="/skins">Skins</NavLink>
+
             {!loading && user && <NavLink href="/upload">Upload</NavLink>}
 
             {!loading && isStaff && (
@@ -194,6 +196,10 @@ export function Header() {
                   Explore library
                 </MobileNavLink>
 
+                <MobileNavLink href="/skins" onClick={closeMenu}>
+                  Skins
+                </MobileNavLink>
+
                 <MobileNavLink href="/resource-packs" onClick={closeMenu}>
                   Resource Packs
                 </MobileNavLink>
@@ -224,11 +230,17 @@ export function Header() {
 
                 {!loading && user ? (
                   <div className="flex items-center gap-3 px-3 py-2">
-                    <Avatar user={user} size={32} />
+                    <Link
+                      href={`/u/${user.username}`}
+                      onClick={closeMenu}
+                      className="flex min-w-0 flex-1 items-center gap-3"
+                    >
+                      <Avatar user={user} size={32} />
 
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--foreground)]">
-                      {user.username}
-                    </span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--foreground)]">
+                        {user.username}
+                      </span>
+                    </Link>
 
                     <Button
                       type="button"
@@ -270,7 +282,7 @@ function UserCluster({
   onSwitched,
   onLogout,
 }: {
-  user: { username: string; avatarUrl: string | null };
+  user: { id: string; username: string; avatarUrl: string | null };
   activeIdentity: ActiveIdentity | null;
   onSwitched: () => void;
   onLogout: () => void;
@@ -278,10 +290,11 @@ function UserCluster({
   return (
     <div className="flex items-center gap-2">
       <AccountSwitcher
+        currentUser={{ id: user.id, username: user.username }}
         activeIdentity={
           activeIdentity ?? {
             kind: "user",
-            id: "",
+            id: user.id,
             username: user.username,
             avatarUrl: user.avatarUrl,
           }

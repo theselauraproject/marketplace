@@ -487,20 +487,17 @@ pub async fn get_project(
         return Err(ApiError::not_found("Project not found"));
     };
 
-    if project.status != "approved" {
-        let current_user = get_current_user(&state.pool, &cookies).await?;
+    let current_user = get_current_user(&state.pool, &cookies).await?;
 
-        let can_view = match &current_user {
-            Some(u) => {
-                can_manage_project(&state.pool, u, project.author_id, project.owner_org_id)
-                    .await?
-            }
-            None => false,
-        };
-
-        if !can_view {
-            return Err(ApiError::not_found("Project not found"));
+    let can_manage = match &current_user {
+        Some(u) => {
+            can_manage_project(&state.pool, u, project.author_id, project.owner_org_id).await?
         }
+        None => false,
+    };
+
+    if project.status != "approved" && !can_manage {
+        return Err(ApiError::not_found("Project not found"));
     }
 
     let versions: Vec<VersionRow> = sqlx::query_as(
@@ -566,6 +563,7 @@ pub async fn get_project(
             "status": project.status,
             "createdAt": project.created_at.to_rfc3339(),
             "updatedAt": project.updated_at.to_rfc3339(),
+            "canManage": can_manage,
 
             "author": author_json(
                 project.author_id,
@@ -578,6 +576,121 @@ pub async fn get_project(
         },
 
         "versions": versions_json,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateProjectBody {
+    name: Option<String>,
+    description: Option<String>,
+    readme: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
+/// The owner-facing edit form. Any change here sends the listing back
+/// through moderation (status -> pending) before it's visible in the
+/// public library again — this is deliberately unconditional, including
+/// for staff, since staff review edits through the separate moderation
+/// queue (`update_status`) rather than this endpoint.
+pub async fn update_project(
+    State(state): State<Arc<AppState>>,
+    cookies: Cookies,
+    Path(slug): Path<String>,
+    Json(body): Json<UpdateProjectBody>,
+) -> ApiResult<Json<Value>> {
+    let user = require_user(&state.pool, &cookies).await?;
+
+    let existing: Option<(Uuid, Uuid, Option<Uuid>)> = sqlx::query_as(
+        "SELECT id, author_id, owner_org_id FROM projects WHERE slug = $1",
+    )
+    .bind(&slug)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let Some((project_id, author_id, owner_org_id)) = existing else {
+        return Err(ApiError::not_found("Project not found"));
+    };
+
+    if !can_manage_project(&state.pool, &user, author_id, owner_org_id).await? {
+        return Err(ApiError::forbidden(
+            "Only the project author, an org member, or staff can edit this project",
+        ));
+    }
+
+    let name = parse_project_name(body.name.as_ref());
+    let description = parse_description(body.description.as_ref());
+
+    let readme = body.readme.as_ref().map(|raw| {
+        raw.trim()
+            .chars()
+            .take(MAX_README_LENGTH)
+            .collect::<String>()
+    });
+
+    let tags = body.tags.map(clean_tags);
+
+    if name.is_none() && description.is_none() && readme.is_none() && tags.is_none() {
+        return Err(ApiError::bad_request("Nothing to update"));
+    }
+
+    let project: ProjectDetailRow = sqlx::query_as(
+        "UPDATE projects
+         SET
+            name = COALESCE($1, name),
+            description = COALESCE($2, description),
+            readme = COALESCE($3, readme),
+            tags = COALESCE($4, tags),
+            status = 'pending',
+            moderation_note = NULL,
+            updated_at = now()
+         WHERE id = $5
+         RETURNING
+            id,
+            slug,
+            name,
+            description,
+            readme,
+            type::text as type,
+            icon_url,
+            header_url,
+            tags,
+            moderation_note,
+            downloads,
+            status::text as status,
+            author_id,
+            created_at,
+            updated_at,
+            ''::text as author_username,
+            NULL::text as author_avatar_url,
+            owner_org_id,
+            NULL::text as owner_org_login,
+            NULL::text as owner_org_avatar_url",
+    )
+    .bind(&name)
+    .bind(&description)
+    .bind(&readme)
+    .bind(&tags)
+    .bind(project_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(Json(json!({
+        "project": {
+            "id": project.id,
+            "slug": project.slug,
+            "name": project.name,
+            "description": project.description,
+            "readme": project.readme,
+            "type": project.project_type,
+            "status": project.status,
+            "downloads": project.downloads,
+            "iconUrl": project.icon_url,
+            "headerUrl": project.header_url,
+            "tags": project.tags,
+            "moderationNote": project.moderation_note,
+            "createdAt": project.created_at.to_rfc3339(),
+            "updatedAt": project.updated_at.to_rfc3339(),
+        }
     })))
 }
 
@@ -777,18 +890,11 @@ fn opt_vec(v: Vec<String>) -> Option<Vec<String>> {
     }
 }
 
-fn parse_tags(raw: Option<&String>) -> Vec<String> {
-    let Some(raw) = raw else {
-        return Vec::new();
-    };
-
-    let parsed: Vec<String> =
-        serde_json::from_str(raw).unwrap_or_default();
-
+fn clean_tags(raw: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut result = Vec::new();
 
-    for tag in parsed {
+    for tag in raw {
         let cleaned: String = tag
             .trim()
             .chars()
@@ -809,6 +915,17 @@ fn parse_tags(raw: Option<&String>) -> Vec<String> {
     }
 
     result
+}
+
+fn parse_tags(raw: Option<&String>) -> Vec<String> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+
+    let parsed: Vec<String> =
+        serde_json::from_str(raw).unwrap_or_default();
+
+    clean_tags(parsed)
 }
 
 fn parse_readme(raw: Option<&String>) -> String {

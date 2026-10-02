@@ -21,7 +21,7 @@ pub async fn get_current_user(pool: &PgPool, cookies: &Cookies) -> sqlx::Result<
     };
 
     let user: Option<User> = sqlx::query_as::<_, User>(
-        "SELECT id, github_id, username, email, avatar_url, role::text as role, created_at, updated_at \
+        "SELECT id, github_id, username, email, avatar_url, role::text as role, bio, discord_url, website_url, created_at, updated_at \
          FROM users WHERE id = $1",
     )
     .bind(session.user_id)
@@ -87,7 +87,7 @@ pub async fn get_active_identity(
     let user_id = session.acting_as_user_id.unwrap_or(session.user_id);
 
     let user: Option<User> = sqlx::query_as::<_, User>(
-        "SELECT id, github_id, username, email, avatar_url, role::text as role, created_at, updated_at \
+        "SELECT id, github_id, username, email, avatar_url, role::text as role, bio, discord_url, website_url, created_at, updated_at \
          FROM users WHERE id = $1",
     )
     .bind(user_id)

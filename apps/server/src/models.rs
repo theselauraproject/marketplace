@@ -11,6 +11,9 @@ pub struct User {
     pub email: Option<String>,
     pub avatar_url: Option<String>,
     pub role: String,
+    pub bio: Option<String>,
+    pub discord_url: Option<String>,
+    pub website_url: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -24,6 +27,9 @@ impl FromRow<'_, PgRow> for User {
             email: row.try_get("email")?,
             avatar_url: row.try_get("avatar_url")?,
             role: row.try_get("role")?,
+            bio: row.try_get("bio")?,
+            discord_url: row.try_get("discord_url")?,
+            website_url: row.try_get("website_url")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -65,6 +71,17 @@ pub struct PublicUser {
     #[serde(rename = "avatarUrl")]
     pub avatar_url: Option<String>,
     pub role: String,
+    pub bio: Option<String>,
+    #[serde(rename = "discordUrl")]
+    pub discord_url: Option<String>,
+    #[serde(rename = "websiteUrl")]
+    pub website_url: Option<String>,
+    /// Derived from the GitHub username this account authenticated with —
+    /// not a separately stored field.
+    #[serde(rename = "githubUrl")]
+    pub github_url: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: DateTime<Utc>,
 }
 
 impl From<&User> for PublicUser {
@@ -75,6 +92,11 @@ impl From<&User> for PublicUser {
             email: u.email.clone(),
             avatar_url: u.avatar_url.clone(),
             role: u.role.clone(),
+            bio: u.bio.clone(),
+            discord_url: u.discord_url.clone(),
+            website_url: u.website_url.clone(),
+            github_url: format!("https://github.com/{}", u.username),
+            created_at: u.created_at,
         }
     }
 }
