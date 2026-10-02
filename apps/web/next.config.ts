@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import type { NextConfig } from "next";
 
 const apiProxyTarget = process.env.API_PROXY_TARGET?.replace(/\/+$/, "");
@@ -10,15 +8,9 @@ if (apiProxyTarget && new URL(apiProxyTarget).port) {
   );
 }
 
-const monorepoRoot = path.join(import.meta.dirname, "../..");
-
 const nextConfig: NextConfig = {
   output: "standalone",
-
   reactCompiler: true,
-
-  outputFileTracingRoot: monorepoRoot,
-
   allowedDevOrigins: ["127.0.0.1"],
 
   async rewrites() {
