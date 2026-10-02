@@ -5,3 +5,6 @@ packages:
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+
+ignoredOptionalDependencies:
+  - sharp

@@ -1,0 +1,6 @@
+{
+  "name": "sharp",
+  "version": "0.35.4",
+  "description": "Stub for sharp: native image processing is not available on Cloudflare Workers",
+  "main": "index.js"
+}
