@@ -37,6 +37,8 @@ jobs:
 
       - name: Build Cloudflare Worker
         working-directory: apps/web
+        env:
+          NEXT_PRIVATE_BUILD_WORKER: "1"
         run: pnpm exec opennextjs-cloudflare build
 
       - name: Deploy to Cloudflare
