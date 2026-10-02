@@ -35,6 +35,44 @@ jobs:
         working-directory: apps/web
         run: pnpm exec tsc --noEmit
 
+      - name: Build Next.js standalone
+        working-directory: apps/web
+        run: pnpm run build
+
+      - name: Inspect Next.js manifests
+        working-directory: apps/web
+        run: |
+          echo "=== .next/server ==="
+          find .next/server -maxdepth 2 -type f | sort | head -200
+
+          echo ""
+          echo "=== .next/standalone ==="
+          find .next/standalone -maxdepth 5 -type f | sort | head -200
+
+          echo ""
+          echo "=== manifests ==="
+          find .next -type f \
+            \( \
+              -name '*manifest*.json' \
+              -o -name 'pages-manifest.json' \
+            \) \
+            -print | sort
+
+          echo ""
+          echo "=== pages-manifest checks ==="
+
+          if [ -f ".next/server/pages-manifest.json" ]; then
+            echo "FOUND: .next/server/pages-manifest.json"
+          else
+            echo "MISSING: .next/server/pages-manifest.json"
+          fi
+
+          if [ -f ".next/standalone/.next/server/pages-manifest.json" ]; then
+            echo "FOUND: .next/standalone/.next/server/pages-manifest.json"
+          else
+            echo "MISSING: .next/standalone/.next/server/pages-manifest.json"
+          fi
+
       - name: Build Cloudflare Worker
         working-directory: apps/web
         run: pnpm run cf:build
