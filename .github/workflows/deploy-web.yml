@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "apps/web/**"
+      - "apps/server/**"
+      - "docker-compose.yml"
       - "packages/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -63,6 +65,9 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Build API container
+        run: docker build -t selaura-api:ci ./apps/server
 
       - name: Typecheck
         working-directory: apps/web

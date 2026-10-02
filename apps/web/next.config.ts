@@ -13,6 +13,7 @@ if (apiProxyTarget && new URL(apiProxyTarget).port) {
 const monorepoRoot = path.join(import.meta.dirname, "../..");
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   reactCompiler: true,
   turbopack: { root: monorepoRoot },
   outputFileTracingRoot: monorepoRoot,

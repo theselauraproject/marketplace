@@ -1,4 +1,27 @@
 services:
+  server:
+    build:
+      context: ./apps/server
+    container_name: selaura-api
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      WEB_URL: ${WEB_URL:-http://localhost:3000}
+      API_URL: ${API_URL:-http://localhost:3001}
+      DATABASE_URL: postgres://selaura:selaura@postgres:5432/selaura
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?Set GITHUB_CLIENT_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
+      ADMIN_GITHUB_ID: ${ADMIN_GITHUB_ID:-}
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - selaura-uploads:/app/uploads
+
   postgres:
     image: postgres:17-alpine
     container_name: selaura-postgres
@@ -18,4 +41,5 @@ services:
       retries: 10
 
 volumes:
+  selaura-uploads:
   selaura-pgdata:

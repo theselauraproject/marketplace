@@ -13,3 +13,27 @@ The Worker proxies `/api/v1/*` and `/uploads/*` to the API, so the browser only 
 5. Point the API at that address: set `WEB_URL` and `API_URL` to the workers.dev address, and set the GitHub OAuth app's callback to `<workers.dev address>/api/v1/auth/github/callback`.
 
 To change the Worker name, edit `name` in `apps/web/wrangler.jsonc`.
+
+## Cloudflare preview deployment
+
+The repository can deploy the Next.js frontend to a free Cloudflare Workers `workers.dev` URL.
+
+Required GitHub Actions configuration:
+
+- Secret `CLOUDFLARE_API_TOKEN`
+- Secret `CLOUDFLARE_ACCOUNT_ID`
+- Optional repository variable `API_URL`, pointing to an externally hosted Selaura API such as `https://api.example.com`
+
+The workflow also builds `apps/server/Dockerfile` in CI, so the Rust API and its Docker setup remain part of the validated project.
+
+### Important architecture note
+
+Cloudflare Workers Free runs the frontend Worker; it does not run this Rust/Axum + PostgreSQL Docker container. The Rust API therefore needs its own host if the deployed preview is expected to load real projects, accounts, uploads, and database data. Without `API_URL`, the Worker can still deploy and static routes such as `/offline` can be previewed, but data-backed pages need an API.
+
+For local full-stack development:
+
+```bash
+docker compose up --build
+```
+
+Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `SESSION_SECRET` in the environment before starting the stack.
